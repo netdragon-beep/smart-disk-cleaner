@@ -1,0 +1,19 @@
+[package]
+name = "smart-disk-cleaner-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI binary for smart-disk-cleaner"
+license = "MIT"
+
+[[bin]]
+name = "smart-disk-cleaner"
+path = "src/main.rs"
+
+[dependencies]
+smart-disk-cleaner-core = { path = "../core" }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

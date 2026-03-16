@@ -1,0 +1,13 @@
+{
+  "name": "smart-disk-cleaner",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "cd ui && vite",
+    "build": "cd ui && vite build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "smart-disk-cleaner-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library for smart-disk-cleaner"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+humansize = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+toml = "0.8"
+tracing = "0.1"
+trash = "5"
+walkdir = "2"

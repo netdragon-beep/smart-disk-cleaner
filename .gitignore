@@ -1,0 +1,8 @@
+/target
+/node_modules
+/.idea
+/.vscode
+scan-report.json
+operations-log.json
+ui/node_modules
+ui/dist
