@@ -2,11 +2,11 @@
 use crate::state::AppState;
 use chrono::Utc;
 use smart_disk_cleaner_core::ai_advisor::{build_advice, AdvisorConfig};
-use smart_disk_cleaner_core::analyzer::{analyze, AnalyzerOptions};
+use smart_disk_cleaner_core::analyzer::{analyze, build_scan_modules, AnalyzerOptions};
 use smart_disk_cleaner_core::dedup::find_duplicates_with_progress;
 use smart_disk_cleaner_core::diagnostics::{probe_path, DiagnosticOperation};
 use smart_disk_cleaner_core::models::{PathDiagnosis, ScanReport};
-use smart_disk_cleaner_core::scanner::scan_directory_with_progress;
+use smart_disk_cleaner_core::scanner::{scan_directory_with_progress_and_options, ScanOptions};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use tauri::{ipc::Channel, State};
@@ -26,12 +26,15 @@ pub async fn start_scan(
     let on_progress_scan = on_progress.clone();
 
     let scan = tokio::task::spawn_blocking(move || {
-        scan_directory_with_progress(
+        scan_directory_with_progress_and_options(
             &root,
             |p| {
                 let _ = on_progress_scan.send(ProgressEvent::from(p));
             },
             cancel_scan,
+            &ScanOptions {
+                exclude_patterns: config.exclude_patterns.clone(),
+            },
         )
     })
     .await
@@ -86,6 +89,8 @@ pub async fn start_scan(
     let report = ScanReport {
         generated_at: Utc::now(),
         root: scan.root.clone(),
+        scanned_files: scan.files.clone(),
+        modules: build_scan_modules(&analysis, &dedup),
         analysis,
         dedup,
         advisor,

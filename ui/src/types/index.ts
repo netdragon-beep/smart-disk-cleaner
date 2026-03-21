@@ -23,7 +23,23 @@ export interface AnalysisResult {
   emptyFiles: FileRecord[];
   emptyDirs: string[];
   largeFiles: FileRecord[];
+  temporaryFiles: FileRecord[];
+  archiveFiles: FileRecord[];
   typeBreakdown: TypeStat[];
+}
+
+export type ScanModuleKind =
+  | "duplicate_files"
+  | "empty_files"
+  | "empty_directories"
+  | "large_files"
+  | "temporary_files"
+  | "archive_files";
+
+export interface ScanModuleSummary {
+  kind: ScanModuleKind;
+  itemCount: number;
+  totalSize: number;
 }
 
 export interface DuplicateGroup {
@@ -57,8 +73,10 @@ export interface AdvisorOutput {
 export interface ScanReport {
   generatedAt: string;
   root: string;
+  scannedFiles: FileRecord[];
   analysis: AnalysisResult;
   dedup: DedupResult;
+  modules: ScanModuleSummary[];
   advisor: AdvisorOutput;
   failures: PathIssue[];
 }

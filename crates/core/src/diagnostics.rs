@@ -1,4 +1,4 @@
-﻿use crate::models::{DiagnosticCode, DiagnosticSeverity, PathDiagnosis};
+use crate::models::{DiagnosticCode, DiagnosticSeverity, PathDiagnosis};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -45,7 +45,11 @@ pub fn probe_path(path: &Path, operation: DiagnosticOperation) -> PathDiagnosis 
         Ok(metadata) => {
             details.push(format!(
                 "路径类型：{}",
-                if metadata.is_dir() { "目录" } else { "文件" }
+                if metadata.is_dir() {
+                    "目录"
+                } else {
+                    "文件"
+                }
             ));
             details.push(format!("只读：{}", metadata.permissions().readonly()));
             if metadata.is_file() {
@@ -211,9 +215,7 @@ fn infer_related_apps(path: &Path) -> Vec<String> {
         match extension.to_ascii_lowercase().as_str() {
             "zip" | "7z" | "rar" | "iso" => hints.push("压缩工具或下载器".to_string()),
             "pdf" => hints.push("PDF 阅读器".to_string()),
-            "doc" | "docx" | "ppt" | "pptx" | "xls" | "xlsx" => {
-                hints.push("办公软件".to_string())
-            }
+            "doc" | "docx" | "ppt" | "pptx" | "xls" | "xlsx" => hints.push("办公软件".to_string()),
             "sqlite" | "db" | "log" => hints.push("数据库客户端、浏览器或 IDE".to_string()),
             "rs" | "toml" | "js" | "ts" | "java" | "py" | "cpp" => {
                 hints.push("IDE、终端或构建工具".to_string())
@@ -244,14 +246,16 @@ mod tests {
     #[test]
     fn detects_windows_sharing_violation() {
         let err = io::Error::from_raw_os_error(32);
-        let diagnosis = diagnose_io_error(Path::new("demo.zip"), DiagnosticOperation::Recycle, &err);
+        let diagnosis =
+            diagnose_io_error(Path::new("demo.zip"), DiagnosticOperation::Recycle, &err);
         assert_eq!(diagnosis.code, DiagnosticCode::InUseByAnotherProcess);
     }
 
     #[test]
     fn maps_not_found_error() {
         let err = io::Error::new(io::ErrorKind::NotFound, "missing");
-        let diagnosis = diagnose_io_error(Path::new("missing.txt"), DiagnosticOperation::Probe, &err);
+        let diagnosis =
+            diagnose_io_error(Path::new("missing.txt"), DiagnosticOperation::Probe, &err);
         assert_eq!(diagnosis.code, DiagnosticCode::NotFound);
     }
 }

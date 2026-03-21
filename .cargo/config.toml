@@ -1,2 +1,2 @@
 [build]
-target-dir = "C:/Users/Lenovo/.cargo-target/smart-disk-cleaner"
+target-dir = "target"

@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use smart_disk_cleaner_core::ai_advisor::{build_advice, AdvisorConfig};
-use smart_disk_cleaner_core::analyzer::{analyze, AnalyzerOptions};
+use smart_disk_cleaner_core::analyzer::{analyze, build_scan_modules, AnalyzerOptions};
 use smart_disk_cleaner_core::dedup::find_duplicates;
 use smart_disk_cleaner_core::diagnostics::probe_path;
 use smart_disk_cleaner_core::executor::{execute_from_report, ExecuteOptions};
@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
             let report = ScanReport {
                 generated_at: Utc::now(),
                 root: scan.root.clone(),
+                modules: build_scan_modules(&analysis, &dedup),
                 analysis,
                 dedup,
                 advisor,

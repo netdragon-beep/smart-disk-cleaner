@@ -50,5 +50,26 @@ export function useConfig() {
     }
   }
 
-  return { config, loading, error, loadConfig, saveConfig, testAiConfig };
+  async function listAiModels(currentConfig: AppConfig): Promise<string[] | null> {
+    loading.value = true;
+    error.value = null;
+    try {
+      return await invoke<string[]>("list_ai_models", { config: currentConfig });
+    } catch (e: any) {
+      error.value = typeof e === "string" ? e : e.message || String(e);
+      return null;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  return {
+    config,
+    loading,
+    error,
+    loadConfig,
+    saveConfig,
+    testAiConfig,
+    listAiModels,
+  };
 }

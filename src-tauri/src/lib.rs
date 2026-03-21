@@ -18,6 +18,7 @@ pub fn run() {
             commands::cleanup::get_operation_history,
             commands::config::load_config,
             commands::config::save_config,
+            commands::config::list_ai_models,
             commands::config::test_ai_config,
         ])
         .run(tauri::generate_context!())

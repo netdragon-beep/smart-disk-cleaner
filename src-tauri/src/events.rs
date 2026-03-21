@@ -36,7 +36,10 @@ impl From<&ScanProgress> for ProgressEvent {
             files_found: p.files_found,
             dirs_visited: p.dirs_visited,
             bytes_found: p.bytes_found,
-            current_path: p.current_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            current_path: p
+                .current_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
         }
     }
 }
@@ -47,7 +50,10 @@ impl From<&DedupProgress> for ProgressEvent {
             phase: p.phase.clone(),
             files_hashed: p.files_hashed,
             files_total: p.files_total,
-            current_path: p.current_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            current_path: p
+                .current_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
         }
     }
 }

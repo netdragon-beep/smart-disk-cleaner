@@ -1,4 +1,4 @@
-﻿use crate::models::{
+use crate::models::{
     AdvisorOutput, AnalysisResult, DedupResult, FileSuggestion, RiskLevel, ScanResult,
     SuggestedAction,
 };
@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::warn;
 
@@ -26,7 +26,11 @@ pub async fn build_advice(
 ) -> Result<AdvisorOutput> {
     let suggestions = build_rule_based_suggestions(analysis, dedup);
 
-    if let Some(api_key) = config.api_key.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(api_key) = config
+        .api_key
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         match request_ai_review(scan, analysis, dedup, &suggestions, config, api_key).await {
             Ok(ai_output) => {
                 return Ok(AdvisorOutput {
@@ -77,6 +81,19 @@ fn build_rule_based_suggestions(
                 reason: "空目录不包含有效数据，适合作为优先清理目标。".to_string(),
             },
             30,
+        );
+    }
+
+    for file in &analysis.temporary_files {
+        upsert_suggestion(
+            &mut suggestions,
+            FileSuggestion {
+                path: file.path.clone(),
+                action: SuggestedAction::Delete,
+                risk: RiskLevel::Low,
+                reason: "临时文件通常是下载中间态、调试残留或缓存副本，适合优先清理。".to_string(),
+            },
+            40,
         );
     }
 
@@ -368,11 +385,7 @@ fn build_local_summary(
 }
 
 pub async fn test_connection(config: &AdvisorConfig) -> Result<String> {
-    let api_key = config
-        .api_key
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("请先配置 AI API Key。"))?;
+    let api_key = configured_api_key(config)?;
     let content = send_chat_completion(
         config,
         api_key,
@@ -385,6 +398,26 @@ pub async fn test_connection(config: &AdvisorConfig) -> Result<String> {
         return Err(anyhow!("AI 返回了空响应。"));
     }
     Ok(trimmed.to_string())
+}
+
+pub async fn fetch_models(config: &AdvisorConfig) -> Result<Vec<String>> {
+    let api_key = configured_api_key(config)?;
+    let client = Client::new();
+    let response = client
+        .get(build_compatible_endpoint(&config.base_url, "models"))
+        .bearer_auth(api_key)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let body: ModelsResponse = response.json().await?;
+    let models = normalize_model_ids(body.data);
+
+    if models.is_empty() {
+        return Err(anyhow!("AI 服务没有返回可用模型列表"));
+    }
+
+    Ok(models)
 }
 
 async fn request_ai_review(
@@ -404,6 +437,8 @@ async fn request_ai_review(
         "root": scan.root,
         "total_files": analysis.total_files,
         "total_size": analysis.total_size,
+        "temporary_files": analysis.temporary_files.len(),
+        "archive_files": analysis.archive_files.len(),
         "empty_files": analysis.empty_files.len(),
         "empty_dirs": analysis.empty_dirs.len(),
         "duplicate_groups": dedup.groups.len(),
@@ -441,9 +476,9 @@ async fn send_chat_completion(
 ) -> Result<String> {
     let client = Client::new();
     let response = client
-        .post(format!(
-            "{}/v1/chat/completions",
-            config.base_url.trim_end_matches('/')
+        .post(build_compatible_endpoint(
+            &config.base_url,
+            "chat/completions",
         ))
         .bearer_auth(api_key)
         .json(&json!({
@@ -471,6 +506,37 @@ async fn send_chat_completion(
         .map(|item| item.message.content.trim().to_string())
         .filter(|content| !content.is_empty())
         .ok_or_else(|| anyhow!("AI 没有返回有效内容。"))
+}
+
+fn configured_api_key(config: &AdvisorConfig) -> Result<&str> {
+    config
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("请先配置 AI API Key。"))
+}
+
+fn build_compatible_endpoint(base_url: &str, endpoint: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{trimmed}/{endpoint}")
+    } else {
+        format!("{trimmed}/v1/{endpoint}")
+    }
+}
+
+fn normalize_model_ids(entries: Vec<ModelEntry>) -> Vec<String> {
+    let mut values = BTreeSet::new();
+    for entry in entries {
+        if let Some(id) = entry.into_id() {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                values.insert(trimmed.to_string());
+            }
+        }
+    }
+    values.into_iter().collect()
 }
 
 fn parse_ai_review_response(content: &str) -> Result<AiReviewResponse> {
@@ -533,11 +599,15 @@ fn sanitize_ai_action(local: &FileSuggestion, ai_item: &FileSuggestion) -> Sugge
 
     match local.action {
         SuggestedAction::Delete => match ai_item.action {
-            SuggestedAction::Delete | SuggestedAction::Move | SuggestedAction::Review => ai_item.action,
+            SuggestedAction::Delete | SuggestedAction::Move | SuggestedAction::Review => {
+                ai_item.action
+            }
             SuggestedAction::Keep => SuggestedAction::Delete,
         },
         SuggestedAction::Move => match ai_item.action {
-            SuggestedAction::Delete | SuggestedAction::Move | SuggestedAction::Review => ai_item.action,
+            SuggestedAction::Delete | SuggestedAction::Move | SuggestedAction::Review => {
+                ai_item.action
+            }
             SuggestedAction::Keep => SuggestedAction::Move,
         },
         SuggestedAction::Review => match ai_item.action {
@@ -588,6 +658,30 @@ struct ChatMessage {
     content: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ModelsResponse {
+    #[serde(default, alias = "models")]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ModelEntry {
+    WithId { id: String },
+    WithName { name: String },
+    Plain(String),
+}
+
+impl ModelEntry {
+    fn into_id(self) -> Option<String> {
+        match self {
+            Self::WithId { id } => Some(id),
+            Self::WithName { name } => Some(name),
+            Self::Plain(value) => Some(value),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ResolvedAiOutput {
     summary: String,
@@ -629,7 +723,10 @@ fn upsert_suggestion(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_rule_based_suggestions, merge_ai_suggestions};
+    use super::{
+        build_compatible_endpoint, build_rule_based_suggestions, merge_ai_suggestions,
+        normalize_model_ids, ModelEntry,
+    };
     use crate::models::{
         AnalysisResult, DedupResult, DuplicateGroup, FileRecord, FileSuggestion, PathIssue,
         RiskLevel, SuggestedAction,
@@ -646,7 +743,12 @@ mod tests {
         }
     }
 
-    fn suggestion(path: &str, action: SuggestedAction, risk: RiskLevel, reason: &str) -> FileSuggestion {
+    fn suggestion(
+        path: &str,
+        action: SuggestedAction,
+        risk: RiskLevel,
+        reason: &str,
+    ) -> FileSuggestion {
         FileSuggestion {
             path: PathBuf::from(path),
             action,
@@ -662,6 +764,8 @@ mod tests {
             empty_files: Vec::new(),
             empty_dirs: Vec::new(),
             large_files: Vec::new(),
+            temporary_files: Vec::new(),
+            archive_files: Vec::new(),
             type_breakdown: Vec::new(),
         }
     }
@@ -805,5 +909,40 @@ mod tests {
         assert_eq!(merged[0].action, SuggestedAction::Review);
         assert_eq!(merged[0].risk, RiskLevel::Medium);
         assert_eq!(merged[0].reason, "AI 建议再确认");
+    }
+
+    #[test]
+    fn builds_compatible_endpoint_for_root_base_url() {
+        assert_eq!(
+            build_compatible_endpoint("https://api.openai.com", "models"),
+            "https://api.openai.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn builds_compatible_endpoint_for_v1_base_url() {
+        assert_eq!(
+            build_compatible_endpoint("https://www.packyapi.com/v1/", "chat/completions"),
+            "https://www.packyapi.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn normalizes_model_ids_from_mixed_entries() {
+        let models = normalize_model_ids(vec![
+            ModelEntry::WithId {
+                id: "gpt-4.1-mini".to_string(),
+            },
+            ModelEntry::WithName {
+                name: "custom-model".to_string(),
+            },
+            ModelEntry::Plain("gpt-4.1-mini".to_string()),
+            ModelEntry::Plain(" ".to_string()),
+        ]);
+
+        assert_eq!(
+            models,
+            vec!["custom-model".to_string(), "gpt-4.1-mini".to_string()]
+        );
     }
 }

@@ -5,13 +5,20 @@ use std::fs;
 use std::path::Path;
 
 pub fn render_summary(report: &ScanReport) -> String {
-    let duplicate_file_count: usize = report.dedup.groups.iter().map(|group| group.files.len()).sum();
+    let duplicate_file_count: usize = report
+        .dedup
+        .groups
+        .iter()
+        .map(|group| group.files.len())
+        .sum();
     format!(
-        "Root: {}\nTotal files: {}\nTotal size: {}\nLarge files: {}\nEmpty files: {}\nEmpty directories: {}\nDuplicate groups: {}\nDuplicate files involved: {}\nAdvice source: {}\nSummary: {}",
+        "Root: {}\nTotal files: {}\nTotal size: {}\nLarge files: {}\nTemporary files: {}\nArchives: {}\nEmpty files: {}\nEmpty directories: {}\nDuplicate groups: {}\nDuplicate files involved: {}\nAdvice source: {}\nSummary: {}",
         report.root.display(),
         report.analysis.total_files,
         format_size(report.analysis.total_size, DECIMAL),
         report.analysis.large_files.len(),
+        report.analysis.temporary_files.len(),
+        report.analysis.archive_files.len(),
         report.analysis.empty_files.len(),
         report.analysis.empty_dirs.len(),
         report.dedup.groups.len(),
@@ -28,7 +35,8 @@ pub fn write_report(path: &Path, report: &ScanReport) -> Result<()> {
 
 pub fn write_operation_log(path: &Path, entries: &[OperationLogEntry]) -> Result<()> {
     let json = serde_json::to_string_pretty(entries)?;
-    fs::write(path, json).with_context(|| format!("failed to write operation log: {}", path.display()))
+    fs::write(path, json)
+        .with_context(|| format!("failed to write operation log: {}", path.display()))
 }
 
 pub fn render_diagnosis(entry: &crate::models::PathDiagnosis) -> String {

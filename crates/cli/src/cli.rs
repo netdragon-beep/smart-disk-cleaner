@@ -1,11 +1,14 @@
+use clap::{Parser, Subcommand, ValueEnum};
 use smart_disk_cleaner_core::diagnostics::DiagnosticOperation;
 use smart_disk_cleaner_core::models::ExecutionMode;
-use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "smart-disk-cleaner")]
-#[command(version, about = "Local disk cleanup and space analysis tool built with Rust and AI")]
+#[command(
+    version,
+    about = "Local disk cleanup and space analysis tool built with Rust and AI"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -40,7 +43,10 @@ pub enum Commands {
         target_dir: Option<PathBuf>,
         #[arg(long, default_value = "operations-log.json")]
         log: PathBuf,
-        #[arg(long, help = "Apply real changes. Without this flag the command stays in dry-run mode.")]
+        #[arg(
+            long,
+            help = "Apply real changes. Without this flag the command stays in dry-run mode."
+        )]
         apply: bool,
     },
     Diagnose {

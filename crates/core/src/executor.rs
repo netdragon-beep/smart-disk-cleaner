@@ -1,4 +1,4 @@
-﻿use crate::diagnostics::{diagnose_io_error, DiagnosticOperation};
+use crate::diagnostics::{diagnose_io_error, DiagnosticOperation};
 use crate::models::{ExecutionMode, OperationLogEntry, PathDiagnosis, ScanReport, SuggestedAction};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
@@ -41,14 +41,18 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
             continue;
         };
 
-        if matches!(suggestion.action, SuggestedAction::Keep | SuggestedAction::Review) {
+        if matches!(
+            suggestion.action,
+            SuggestedAction::Keep | SuggestedAction::Review
+        ) {
             logs.push(OperationLogEntry {
                 at: Utc::now(),
                 path: path.clone(),
                 mode: options.mode,
                 dry_run: options.dry_run,
                 success: false,
-                detail: "该文件被标记为“保留”或“待审”，系统已禁止直接清理，请先人工确认。".to_string(),
+                detail: "该文件被标记为“保留”或“待审”，系统已禁止直接清理，请先人工确认。"
+                    .to_string(),
                 diagnosis: None,
             });
             continue;
@@ -137,8 +141,9 @@ fn move_path(
             &err,
         )
     })?;
-    let destination = unique_destination_path(target_dir, path)
-        .map_err(|err| ExecutionFailure::message_only(err.to_string(), path, DiagnosticOperation::Move))?;
+    let destination = unique_destination_path(target_dir, path).map_err(|err| {
+        ExecutionFailure::message_only(err.to_string(), path, DiagnosticOperation::Move)
+    })?;
 
     if dry_run {
         return Ok(format!("模拟执行：将移动到 {}", destination.display()));
@@ -329,18 +334,22 @@ mod tests {
         ScanReport {
             generated_at: Utc::now(),
             root: PathBuf::from(r"E:\test"),
+            scanned_files: Vec::new(),
             analysis: AnalysisResult {
                 total_files: 0,
                 total_size: 0,
                 empty_files: Vec::new(),
                 empty_dirs: Vec::new(),
                 large_files: Vec::new(),
+                temporary_files: Vec::new(),
+                archive_files: Vec::new(),
                 type_breakdown: Vec::new(),
             },
             dedup: DedupResult {
                 groups: Vec::new(),
                 failures: Vec::new(),
             },
+            modules: Vec::new(),
             advisor: AdvisorOutput {
                 source: "local_rules".to_string(),
                 summary: String::new(),

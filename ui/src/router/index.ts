@@ -11,7 +11,7 @@ const router = createRouter({
     {
       path: "/results",
       name: "results",
-      component: () => import("@/views/ResultsView.vue"),
+      component: () => import("@/views/ResultsWorkbenchView.vue"),
     },
     {
       path: "/cleanup",
