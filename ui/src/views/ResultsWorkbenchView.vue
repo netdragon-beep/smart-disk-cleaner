@@ -2,11 +2,13 @@
 import { computed, h, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
+  NAlert,
   NButton,
   NCard,
   NDataTable,
   NEmpty,
   NGi,
+  NModal,
   NGrid,
   NInput,
   NSelect,
@@ -26,7 +28,9 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { useAppStore } from "@/stores/app";
+import { useAiFile } from "@/composables/useAiFile";
 import type {
+  FileAiInsight,
   FileRecord,
   FileSuggestion,
   ScanModuleKind,
@@ -37,10 +41,21 @@ import type {
 interface DirectoryOverviewRow {
   key: string;
   name: string;
+  path: string;
   kind: "directory" | "file";
   fileCount: number;
   totalSize: number;
   preview: string;
+}
+
+interface DirectoryOverviewBucket {
+  key: string;
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+  fileCount: number;
+  totalSize: number;
+  preview: Set<string>;
 }
 
 interface FileTreeRow {
@@ -117,6 +132,24 @@ const TEXT = {
   moveAdvice: "建议移动",
   duplicate: "重复",
   aiSummary: "AI 摘要",
+  aiInspect: "AI 解读",
+  aiInspectTitle: "路径 AI 解读",
+  aiInspectHint: "支持对单个文件或目录调用 AI。目录分析只会上传文件名、扩展名、大小、数量等摘要信息，不会读取整个目录下所有文件内容，用来减少 token 消耗。",
+  aiInspectFailed: "路径 AI 解读失败",
+  aiInspectRemoteSuccess: "已成功调用远程 AI 模型",
+  aiInspectFallbackTitle: "远程 AI 调用失败，已回退本地规则",
+  aiInspectLocalOnlyTitle: "当前未调用远程 AI，展示的是本地规则结果",
+  aiInspectFallbackReason: "回退原因",
+  aiInspectReason: "处理建议说明",
+  aiInspectSummary: "AI 解读结论",
+  aiInspectLoading: "正在分析这个路径，请稍候...",
+  aiInspectTargetFile: "文件",
+  aiInspectTargetDirectory: "目录",
+  aiRiskLow: "低风险",
+  aiRiskMedium: "中风险",
+  aiRiskHigh: "高风险",
+  close: "关闭",
+  retry: "重新分析",
   goCleanup: "前往清理",
   groupPrefix: "第",
   groupSuffix: "组",
@@ -134,9 +167,13 @@ use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer
 
 const router = useRouter();
 const store = useAppStore();
+const { loading: aiLoading, error: aiError, explainFile } = useAiFile();
 const report = computed(() => store.report);
 const fileQuery = ref("");
 const selectedCategory = ref<FileCategory>("all");
+const aiInsightVisible = ref(false);
+const aiInsight = ref<FileAiInsight | null>(null);
+const selectedAiPath = ref("");
 
 const IMAGE_EXTENSIONS = new Set([
   "png",
@@ -290,13 +327,7 @@ const suggestionByPath = computed(() => {
 });
 
 const advisorSourceLabel = computed(() => {
-  const source = report.value?.advisor.source;
-  if (!source) return "";
-  if (source === "local_rules") return TEXT.localRules;
-  if (source.startsWith("remote:")) {
-    return `${TEXT.remoteModel}${source.slice("remote:".length)}`;
-  }
-  return source;
+  return formatSourceLabel(report.value?.advisor.source);
 });
 
 const moduleCards = computed(() =>
@@ -390,6 +421,24 @@ const fileTreeColumns: DataTableColumns<FileTreeRow> = [
     width: 90,
     render: (row) => (row.kind === "directory" ? row.fileCount : "-"),
   },
+  {
+    title: TEXT.aiInspect,
+    key: "aiInspect",
+    width: 110,
+    render: (row) =>
+      h(
+        NButton,
+        {
+          size: "tiny",
+          secondary: true,
+          type: "primary",
+          loading: aiLoading.value && selectedAiPath.value === row.path,
+          disabled: aiLoading.value && selectedAiPath.value !== row.path,
+          onClick: () => void inspectFileWithAi(row.path),
+        },
+        () => TEXT.aiInspect
+      ),
+  },
 ];
 
 const fileColumns: DataTableColumns<FileRecord> = [
@@ -410,6 +459,24 @@ const fileColumns: DataTableColumns<FileRecord> = [
     key: "extension",
     width: 110,
     render: (row) => row.extension || "-",
+  },
+  {
+    title: TEXT.aiInspect,
+    key: "aiInspect",
+    width: 110,
+    render: (row) =>
+      h(
+        NButton,
+        {
+          size: "tiny",
+          secondary: true,
+          type: "primary",
+          loading: aiLoading.value && selectedAiPath.value === row.path,
+          disabled: aiLoading.value && selectedAiPath.value !== row.path,
+          onClick: () => void inspectFileWithAi(row.path),
+        },
+        () => TEXT.aiInspect
+      ),
   },
 ];
 
@@ -449,22 +516,30 @@ const directoryColumns: DataTableColumns<DirectoryOverviewRow> = [
     key: "preview",
     ellipsis: { tooltip: true },
   },
+  {
+    title: TEXT.aiInspect,
+    key: "aiInspect",
+    width: 110,
+    render: (row) =>
+      h(
+        NButton,
+        {
+          size: "tiny",
+          secondary: true,
+          type: "primary",
+          loading: aiLoading.value && selectedAiPath.value === row.path,
+          disabled: aiLoading.value && selectedAiPath.value !== row.path,
+          onClick: () => void inspectFileWithAi(row.path),
+        },
+        () => TEXT.aiInspect
+      ),
+  },
 ];
 
 const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
   if (!report.value) return [];
 
-  const buckets = new Map<
-    string,
-    {
-      key: string;
-      name: string;
-      kind: "directory" | "file";
-      fileCount: number;
-      totalSize: number;
-      preview: Set<string>;
-    }
-  >();
+  const buckets = new Map<string, DirectoryOverviewBucket>();
 
   for (const file of report.value.scannedFiles) {
     const parts = relativeParts(file.path, report.value.root);
@@ -474,6 +549,7 @@ const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
       buckets.set(`file:${parts[0]}`, {
         key: `file:${parts[0]}`,
         name: parts[0],
+        path: file.path,
         kind: "file",
         fileCount: 1,
         totalSize: file.size,
@@ -488,6 +564,7 @@ const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
       {
         key,
         name: parts[0],
+        path: report.value.root ? `${report.value.root}/${parts[0]}` : parts[0],
         kind: "directory" as const,
         fileCount: 0,
         totalSize: 0,
@@ -512,6 +589,7 @@ const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
       {
         key,
         name: parts[0],
+        path: report.value.root ? `${report.value.root}/${parts[0]}` : parts[0],
         kind: "directory" as const,
         fileCount: 0,
         totalSize: 0,
@@ -528,6 +606,7 @@ const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
     .map((item) => ({
       key: item.key,
       name: item.name,
+      path: item.path,
       kind: item.kind,
       fileCount: item.fileCount,
       totalSize: item.totalSize,
@@ -722,6 +801,77 @@ function moduleDescription(kind: ScanModuleKind): string {
 
 function goToCleanup() {
   router.push({ name: "cleanup" });
+}
+
+async function inspectFileWithAi(path: string) {
+  selectedAiPath.value = path;
+  aiInsightVisible.value = true;
+  aiInsight.value = null;
+  const result = await explainFile(path, store.config);
+  if (result) {
+    aiInsight.value = result;
+  }
+}
+
+function formatSourceLabel(source?: string | null): string {
+  if (!source) return "";
+  if (source === "local_rules") return TEXT.localRules;
+  if (source.startsWith("remote:")) {
+    return `${TEXT.remoteModel}${source.slice("remote:".length)}`;
+  }
+  return source;
+}
+
+function actionTagType(action: SuggestedAction): "default" | "success" | "warning" | "error" | "info" {
+  if (action === "keep") return "success";
+  if (action === "review") return "info";
+  if (action === "move") return "warning";
+  if (action === "delete") return "error";
+  return "default";
+}
+
+function actionLabel(action: SuggestedAction): string {
+  if (action === "keep") return TEXT.keep;
+  if (action === "review") return TEXT.review;
+  if (action === "move") return TEXT.moveAdvice;
+  if (action === "delete") return TEXT.deleteAdvice;
+  return action;
+}
+
+function riskTagType(risk: "low" | "medium" | "high"): "success" | "warning" | "error" {
+  if (risk === "low") return "success";
+  if (risk === "medium") return "warning";
+  return "error";
+}
+
+function riskLabel(risk: "low" | "medium" | "high"): string {
+  if (risk === "low") return TEXT.aiRiskLow;
+  if (risk === "medium") return TEXT.aiRiskMedium;
+  return TEXT.aiRiskHigh;
+}
+
+function aiTargetKindLabel(targetKind: FileAiInsight["targetKind"]): string {
+  if (targetKind === "directory") return TEXT.aiInspectTargetDirectory;
+  return TEXT.aiInspectTargetFile;
+}
+
+function normalizeAiText(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[，。、“”‘’：；！？、,.!?:;"'()[\]{}\-_\s]/g, "");
+}
+
+function shouldShowSeparateReasonCard(insight: FileAiInsight): boolean {
+  const normalizedSummary = normalizeAiText(insight.summary);
+  const normalizedReason = normalizeAiText(insight.reason);
+
+  if (!normalizedReason) return false;
+  if (!normalizedSummary) return true;
+  if (normalizedSummary === normalizedReason) return false;
+  if (normalizedSummary.includes(normalizedReason)) return false;
+  if (normalizedReason.includes(normalizedSummary)) return false;
+  return true;
 }
 
 function duplicateTagType(path: string): "default" | "success" | "warning" | "error" | "info" {
@@ -954,5 +1104,101 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
         {{ TEXT.goCleanup }}
       </n-button>
     </n-space>
+
+    <n-modal v-model:show="aiInsightVisible" style="width: min(720px, calc(100vw - 32px))">
+      <n-card :title="TEXT.aiInspectTitle" :bordered="false" size="small" role="dialog" aria-modal="true">
+        <n-space vertical :size="12">
+          <n-text depth="3">{{ TEXT.aiInspectHint }}</n-text>
+          <n-text style="word-break: break-all">{{ selectedAiPath }}</n-text>
+
+          <n-alert v-if="aiError" type="error" :title="TEXT.aiInspectFailed">
+            {{ aiError }}
+          </n-alert>
+
+          <template v-else-if="aiLoading">
+            <n-text>{{ TEXT.aiInspectLoading }}</n-text>
+          </template>
+
+          <template v-else-if="aiInsight">
+            <n-alert
+              v-if="aiInsight.usedFallback"
+              type="warning"
+              :title="TEXT.aiInspectFallbackTitle"
+            >
+              <div>{{ aiInsight.fallbackReason || '-' }}</div>
+            </n-alert>
+
+            <n-alert
+              v-else-if="!aiInsight.remoteAttempted && aiInsight.source === 'local_rules'"
+              type="info"
+              :title="TEXT.aiInspectLocalOnlyTitle"
+            >
+              {{ TEXT.localRules }}
+            </n-alert>
+
+            <n-alert
+              v-else-if="aiInsight.source.startsWith('remote')"
+              type="success"
+              :title="TEXT.aiInspectRemoteSuccess"
+            >
+              {{ formatSourceLabel(aiInsight.source) }}
+            </n-alert>
+
+            <n-space>
+              <n-tag size="small" type="default">
+                {{ aiTargetKindLabel(aiInsight.targetKind) }}
+              </n-tag>
+              <n-tag size="small" :type="aiInsight.source.startsWith('remote') ? 'info' : 'default'">
+                {{ formatSourceLabel(aiInsight.source) }}
+              </n-tag>
+              <n-tag size="small" :type="actionTagType(aiInsight.suggestedAction)">
+                {{ actionLabel(aiInsight.suggestedAction) }}
+              </n-tag>
+              <n-tag size="small" :type="riskTagType(aiInsight.risk)">
+                {{ riskLabel(aiInsight.risk) }}
+              </n-tag>
+            </n-space>
+
+            <n-card size="small" embedded>
+              <n-text depth="3">
+                {{ shouldShowSeparateReasonCard(aiInsight) ? TEXT.aiInspectSummary : TEXT.aiInspectReason }}
+              </n-text>
+              <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
+                {{ aiInsight.summary }}
+              </n-text>
+            </n-card>
+
+            <n-card v-if="shouldShowSeparateReasonCard(aiInsight)" size="small" embedded>
+              <n-text depth="3">{{ TEXT.aiInspectReason }}</n-text>
+              <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
+                {{ aiInsight.reason }}
+              </n-text>
+            </n-card>
+
+            <n-card v-if="aiInsight.usedFallback && aiInsight.fallbackReason" size="small" embedded>
+              <n-text depth="3">{{ TEXT.aiInspectFallbackReason }}</n-text>
+              <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
+                {{ aiInsight.fallbackReason }}
+              </n-text>
+            </n-card>
+          </template>
+        </n-space>
+
+        <template #footer>
+          <n-space justify="end">
+            <n-button @click="aiInsightVisible = false">{{ TEXT.close }}</n-button>
+            <n-button
+              type="primary"
+              secondary
+              :loading="aiLoading"
+              :disabled="!selectedAiPath"
+              @click="inspectFileWithAi(selectedAiPath)"
+            >
+              {{ TEXT.retry }}
+            </n-button>
+          </n-space>
+        </template>
+      </n-card>
+    </n-modal>
   </div>
 </template>

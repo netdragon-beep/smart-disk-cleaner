@@ -42,6 +42,9 @@ const TEXT = {
   aiTestButton: "测试 AI 连接",
   aiTestSuccess: "AI 连接成功",
   aiTestFailed: "AI 连接失败",
+  strictFileAiRemoteOnly: "路径 AI 严格远程模式",
+  strictFileAiRemoteOnlyHint:
+    "开启后，文件或目录的 AI 解读都必须成功调用远程模型；如果 API Key 未配置、超时、401 或返回格式不兼容，将直接报错，不再静默回退到本地规则。",
   excludePatterns: "排除规则",
   darkMode: "深色模式",
   saveSettings: "保存设置",
@@ -65,6 +68,7 @@ const form = ref<AppConfig>({
   apiKey: null,
   aiBaseUrl: "https://api.openai.com",
   aiModel: "gpt-4.1-mini",
+  strictFileAiRemoteOnly: false,
   excludePatterns: [],
   theme: "dark",
 });
@@ -102,6 +106,7 @@ onMounted(async () => {
   const cfg = await loadConfig();
   if (cfg) {
     form.value = { ...cfg };
+    store.setConfig({ ...cfg });
   }
   await loadModelOptions({ silent: true });
 });
@@ -127,6 +132,14 @@ watch(
       void loadModelOptions({ silent: true });
     }, 500);
   }
+);
+
+watch(
+  form,
+  (value) => {
+    store.setConfig({ ...value });
+  },
+  { deep: true }
 );
 
 async function handleSave() {
@@ -285,6 +298,15 @@ async function loadModelOptions(options: { silent?: boolean; force?: boolean } =
           >
             {{ TEXT.aiTestButton }}
           </n-button>
+        </n-form-item>
+
+        <n-form-item :label="TEXT.strictFileAiRemoteOnly">
+          <n-space vertical :size="8" style="width: 100%">
+            <n-switch v-model:value="form.strictFileAiRemoteOnly" />
+            <n-alert type="warning">
+              {{ TEXT.strictFileAiRemoteOnlyHint }}
+            </n-alert>
+          </n-space>
         </n-form-item>
 
         <n-form-item :label="TEXT.excludePatterns">

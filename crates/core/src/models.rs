@@ -101,6 +101,13 @@ pub enum RiskLevel {
     High,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiInsightTargetKind {
+    File,
+    Directory,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileSuggestion {
@@ -116,6 +123,21 @@ pub struct AdvisorOutput {
     pub source: String,
     pub summary: String,
     pub suggestions: Vec<FileSuggestion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileAiInsight {
+    pub path: PathBuf,
+    pub target_kind: AiInsightTargetKind,
+    pub source: String,
+    pub summary: String,
+    pub suggested_action: SuggestedAction,
+    pub risk: RiskLevel,
+    pub reason: String,
+    pub remote_attempted: bool,
+    pub used_fallback: bool,
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

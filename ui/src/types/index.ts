@@ -56,6 +56,7 @@ export interface DedupResult {
 
 export type SuggestedAction = "delete" | "keep" | "move" | "review";
 export type RiskLevel = "low" | "medium" | "high";
+export type AiInsightTargetKind = "file" | "directory";
 
 export interface FileSuggestion {
   path: string;
@@ -68,6 +69,19 @@ export interface AdvisorOutput {
   source: string;
   summary: string;
   suggestions: FileSuggestion[];
+}
+
+export interface FileAiInsight {
+  path: string;
+  targetKind: AiInsightTargetKind;
+  source: string;
+  summary: string;
+  suggestedAction: SuggestedAction;
+  risk: RiskLevel;
+  reason: string;
+  remoteAttempted: boolean;
+  usedFallback: boolean;
+  fallbackReason: string | null;
 }
 
 export interface ScanReport {
@@ -126,6 +140,7 @@ export interface AppConfig {
   apiKey: string | null;
   aiBaseUrl: string;
   aiModel: string;
+  strictFileAiRemoteOnly: boolean;
   excludePatterns: string[];
   theme: string;
 }

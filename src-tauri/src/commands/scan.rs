@@ -81,6 +81,7 @@ pub async fn start_scan(
             base_url: config.ai_base_url.clone(),
             model: config.ai_model.clone(),
             max_items: config.max_ai_items,
+            strict_file_ai_remote_only: config.strict_file_ai_remote_only,
         },
     )
     .await

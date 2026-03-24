@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
                     base_url: ai_base_url,
                     model: ai_model,
                     max_items: max_ai_items,
+                    strict_file_ai_remote_only: false,
                 },
             )
             .await?;

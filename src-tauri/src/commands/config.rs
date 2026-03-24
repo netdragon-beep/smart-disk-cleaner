@@ -20,6 +20,7 @@ pub async fn test_ai_config(config: AppConfig) -> Result<String, String> {
         base_url: config.ai_base_url,
         model: config.ai_model,
         max_items: config.max_ai_items,
+        strict_file_ai_remote_only: config.strict_file_ai_remote_only,
     })
     .await
     .map_err(|e| e.to_string())
@@ -32,6 +33,7 @@ pub async fn list_ai_models(config: AppConfig) -> Result<Vec<String>, String> {
         base_url: config.ai_base_url,
         model: config.ai_model,
         max_items: config.max_ai_items,
+        strict_file_ai_remote_only: config.strict_file_ai_remote_only,
     })
     .await
     .map_err(|e| e.to_string())

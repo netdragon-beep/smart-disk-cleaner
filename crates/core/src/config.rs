@@ -24,6 +24,10 @@ pub struct AppConfig {
     #[serde(default = "default_ai_model")]
     pub ai_model: String,
 
+    /// Whether file-level AI explanation must use remote AI and never silently fall back.
+    #[serde(default)]
+    pub strict_file_ai_remote_only: bool,
+
     /// Glob patterns to exclude from scanning.
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
@@ -41,6 +45,7 @@ impl Default for AppConfig {
             api_key: None,
             ai_base_url: default_ai_base_url(),
             ai_model: default_ai_model(),
+            strict_file_ai_remote_only: false,
             exclude_patterns: Vec::new(),
             theme: default_theme(),
         }

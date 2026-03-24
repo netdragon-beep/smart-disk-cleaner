@@ -11,6 +11,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
+            commands::ai::explain_file_with_ai,
             commands::scan::start_scan,
             commands::scan::cancel_scan,
             commands::scan::diagnose_path,
