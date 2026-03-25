@@ -22,6 +22,22 @@ const BUILTIN_EXCLUDE_PATTERNS: &[&str] = &[
     "**/AppData/Local/**/Caches/**",
 ];
 
+const WINDOWS_SYSTEM_ROOT_EXCLUDES: &[&str] = &[
+    "Windows/**",
+    "Program Files/**",
+    "Program Files (x86)/**",
+    "ProgramData/**",
+    "System Volume Information/**",
+    "$Recycle.Bin/**",
+    "Recovery/**",
+    "PerfLogs/**",
+    "Documents and Settings/**",
+    "pagefile.sys",
+    "hiberfil.sys",
+    "swapfile.sys",
+    "DumpStack.log.tmp",
+];
+
 /// Progress information emitted during directory scanning.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,7 +101,7 @@ where
         bail!("scan path is not a directory: {}", root.display());
     }
 
-    let exclude_matcher = build_exclude_matcher(&options.exclude_patterns)?;
+    let exclude_matcher = build_exclude_matcher(root, &options.exclude_patterns)?;
     let mut files = Vec::new();
     let mut empty_dirs = Vec::new();
     let mut failures = Vec::new();
@@ -175,10 +191,15 @@ where
     })
 }
 
-fn build_exclude_matcher(patterns: &[String]) -> Result<GlobSet> {
+fn build_exclude_matcher(root: &Path, patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in BUILTIN_EXCLUDE_PATTERNS {
         builder.add(Glob::new(pattern)?);
+    }
+    if is_windows_drive_root(root) {
+        for pattern in WINDOWS_SYSTEM_ROOT_EXCLUDES {
+            builder.add(Glob::new(pattern)?);
+        }
     }
     for pattern in patterns
         .iter()
@@ -188,6 +209,11 @@ fn build_exclude_matcher(patterns: &[String]) -> Result<GlobSet> {
         builder.add(Glob::new(pattern)?);
     }
     Ok(builder.build()?)
+}
+
+fn is_windows_drive_root(path: &Path) -> bool {
+    let display = path.to_string_lossy().replace('\\', "/");
+    display.len() >= 2 && display.as_bytes()[1] == b':' && display[2..].trim_matches('/').is_empty()
 }
 
 fn is_excluded(path: &Path, root: &Path, matcher: &GlobSet) -> bool {

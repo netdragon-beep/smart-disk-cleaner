@@ -1,5 +1,6 @@
-﻿<script setup lang="ts">
-import { computed, h, ref } from "vue";
+<script setup lang="ts">
+import { invoke } from "@tauri-apps/api/core";
+import { computed, h, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   NAlert,
@@ -8,9 +9,9 @@ import {
   NDataTable,
   NEmpty,
   NGi,
-  NModal,
   NGrid,
   NInput,
+  NModal,
   NSelect,
   NSpace,
   NStatistic,
@@ -30,44 +31,16 @@ import { CanvasRenderer } from "echarts/renderers";
 import { useAppStore } from "@/stores/app";
 import { useAiFile } from "@/composables/useAiFile";
 import type {
+  DirectoryOverviewRow,
   FileAiInsight,
   FileRecord,
   FileSuggestion,
+  FileTreeQueryResult,
+  FileTreeRow,
   ScanModuleKind,
   ScanModuleSummary,
   SuggestedAction,
 } from "@/types";
-
-interface DirectoryOverviewRow {
-  key: string;
-  name: string;
-  path: string;
-  kind: "directory" | "file";
-  fileCount: number;
-  totalSize: number;
-  preview: string;
-}
-
-interface DirectoryOverviewBucket {
-  key: string;
-  name: string;
-  path: string;
-  kind: "directory" | "file";
-  fileCount: number;
-  totalSize: number;
-  preview: Set<string>;
-}
-
-interface FileTreeRow {
-  key: string;
-  name: string;
-  path: string;
-  kind: "directory" | "file";
-  size: number;
-  extension: string;
-  fileCount: number;
-  children?: FileTreeRow[];
-}
 
 type FileCategory =
   | "all"
@@ -107,11 +80,10 @@ const TEXT = {
   file: "文件",
   scannedFiles: "分层文件清单",
   scannedFilesHintPrefix: "共匹配 ",
-  scannedFilesHintMiddle: " 个文件，按目录分层展示 ",
-  scannedFilesHintSuffix: " 个节点。",
+  scannedFilesHintMiddle: " 个文件，当前展示 ",
+  scannedFilesHintSuffix: " 个树节点。",
   fileSearchPlaceholder: "按文件名、路径或扩展名筛选，例如 pdf、src、README",
   fileCategoryPlaceholder: "按文件类型筛选",
-  fileCategory: "文件类型筛选",
   categoryAll: "全部文件",
   categoryImage: "图片文件",
   categoryVideo: "视频文件",
@@ -134,7 +106,8 @@ const TEXT = {
   aiSummary: "AI 摘要",
   aiInspect: "AI 解读",
   aiInspectTitle: "路径 AI 解读",
-  aiInspectHint: "支持对单个文件或目录调用 AI。目录分析只会上传文件名、扩展名、大小、数量等摘要信息，不会读取整个目录下所有文件内容，用来减少 token 消耗。",
+  aiInspectHint:
+    "支持对单个文件或目录调用 AI。目录分析只会上传文件名、扩展名、大小、数量等摘要信息，不会读取整个目录下所有文件内容，用来减少 token 消耗。",
   aiInspectFailed: "路径 AI 解读失败",
   aiInspectRemoteSuccess: "已成功调用远程 AI 模型",
   aiInspectFallbackTitle: "远程 AI 调用失败，已回退本地规则",
@@ -161,6 +134,16 @@ const TEXT = {
   moduleDescEmptyFiles: "体积为 0 的文件",
   moduleDescEmptyDirs: "不包含任何内容的目录",
   emptyOverview: "当前扫描结果没有可展示的目录内容。",
+  loadingDirectoryOverview: "正在加载目录概览...",
+  loadingFileTree: "正在按当前筛选条件加载文件树...",
+  directoryOverviewFailed: "目录概览加载失败",
+  fileTreeFailed: "文件清单加载失败",
+  fileTreeEmpty: "当前筛选条件下没有匹配文件。",
+  fileTreeTruncated: "匹配结果过多，当前仅展示前 3000 个匹配文件以避免页面卡死。",
+  fileTreeCollapsed: "结果较多，目录默认折叠显示，避免界面卡顿。",
+  suggestionsLimited: "建议列表已做截断，仅展示前 1000 条建议。",
+  duplicateGroupsLimited: "重复文件组已做截断，仅展示前 10 组。",
+  sectionLimited: "当前结果页仅展示前 50 项，避免大盘扫描导致页面占用过高。",
 };
 
 use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
@@ -169,154 +152,27 @@ const router = useRouter();
 const store = useAppStore();
 const { loading: aiLoading, error: aiError, explainFile } = useAiFile();
 const report = computed(() => store.report);
+const reportKey = computed(() =>
+  report.value ? `${report.value.generatedAt}:${report.value.root}` : ""
+);
+
 const fileQuery = ref("");
 const selectedCategory = ref<FileCategory>("all");
 const aiInsightVisible = ref(false);
 const aiInsight = ref<FileAiInsight | null>(null);
 const selectedAiPath = ref("");
 
-const IMAGE_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "bmp",
-  "webp",
-  "svg",
-  "ico",
-  "tif",
-  "tiff",
-  "heic",
-  "heif",
-  "raw",
-  "psd",
-  "avif",
-]);
+const directoryOverviewRows = ref<DirectoryOverviewRow[]>([]);
+const directoryOverviewLoading = ref(false);
+const directoryOverviewError = ref<string | null>(null);
 
-const VIDEO_EXTENSIONS = new Set([
-  "mp4",
-  "mkv",
-  "avi",
-  "mov",
-  "wmv",
-  "flv",
-  "webm",
-  "m4v",
-  "mpeg",
-  "mpg",
-  "ts",
-  "3gp",
-  "rmvb",
-]);
+const fileTreeResult = ref<FileTreeQueryResult>(emptyFileTreeResult());
+const fileTreeLoading = ref(false);
+const fileTreeError = ref<string | null>(null);
 
-const AUDIO_EXTENSIONS = new Set([
-  "mp3",
-  "wav",
-  "flac",
-  "aac",
-  "m4a",
-  "ogg",
-  "wma",
-  "opus",
-  "ape",
-  "amr",
-  "mid",
-  "midi",
-]);
-
-const ARCHIVE_EXTENSIONS = new Set([
-  "zip",
-  "zipx",
-  "7z",
-  "rar",
-  "tar",
-  "gz",
-  "tgz",
-  "bz2",
-  "xz",
-  "cab",
-  "iso",
-  "img",
-  "dmg",
-  "jar",
-]);
-
-const EXECUTABLE_EXTENSIONS = new Set([
-  "exe",
-  "com",
-  "msi",
-  "msix",
-  "msixbundle",
-  "appx",
-  "appxbundle",
-  "bat",
-  "cmd",
-  "ps1",
-  "vbs",
-  "js",
-  "jar",
-  "scr",
-]);
-
-const DOCUMENT_EXTENSIONS = new Set([
-  "pdf",
-  "doc",
-  "docx",
-  "ppt",
-  "pptx",
-  "xls",
-  "xlsx",
-  "csv",
-  "txt",
-  "md",
-  "rtf",
-  "wps",
-  "odt",
-  "ods",
-  "odp",
-]);
-
-const CODE_EXTENSIONS = new Set([
-  "rs",
-  "toml",
-  "json",
-  "yaml",
-  "yml",
-  "xml",
-  "ini",
-  "cfg",
-  "conf",
-  "env",
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "vue",
-  "py",
-  "java",
-  "kt",
-  "go",
-  "c",
-  "cc",
-  "cpp",
-  "h",
-  "hpp",
-  "cs",
-  "php",
-  "rb",
-  "swift",
-  "scala",
-  "sql",
-  "html",
-  "css",
-  "scss",
-  "less",
-  "sh",
-  "bash",
-  "zsh",
-  "ps1",
-  "lock",
-]);
+let fileTreeTimer: ReturnType<typeof setTimeout> | null = null;
+let fileTreeRequestId = 0;
+let directoryOverviewRequestId = 0;
 
 const suggestionByPath = computed(() => {
   const map = new Map<string, FileSuggestion>();
@@ -326,9 +182,13 @@ const suggestionByPath = computed(() => {
   return map;
 });
 
-const advisorSourceLabel = computed(() => {
-  return formatSourceLabel(report.value?.advisor.source);
-});
+const advisorSourceLabel = computed(() => formatSourceLabel(report.value?.advisor.source));
+const duplicateGroupCount = computed(
+  () => report.value?.dedup.groupCount ?? report.value?.dedup.groups.length ?? 0
+);
+const suggestionCount = computed(
+  () => report.value?.advisor.suggestionCount ?? report.value?.advisor.suggestions.length ?? 0
+);
 
 const moduleCards = computed(() =>
   (report.value?.modules ?? []).map((item: ScanModuleSummary) => ({
@@ -353,9 +213,9 @@ const typeChartOption = computed(() => {
         itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
         label: { show: false },
         emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
-        data: breakdown.map((t) => ({
-          name: t.extension || TEXT.noExt,
-          value: t.totalSize,
+        data: breakdown.map((item) => ({
+          name: item.extension || TEXT.noExt,
+          value: item.totalSize,
         })),
       },
     ],
@@ -373,6 +233,13 @@ const fileCategoryOptions = [
   { label: TEXT.categoryCode, value: "code" },
   { label: TEXT.categoryOther, value: "other" },
 ];
+
+const fileTreeRows = computed(() => fileTreeResult.value.rows);
+const scannedFilesHint = computed(() => {
+  if (!report.value) return "";
+  return `${TEXT.scannedFilesHintPrefix}${fileTreeResult.value.matchedCount}${TEXT.scannedFilesHintMiddle}${fileTreeResult.value.nodeCount}${TEXT.scannedFilesHintSuffix}`;
+});
+const shouldExpandFileTree = computed(() => fileTreeResult.value.nodeCount <= 200);
 
 const fileTreeColumns: DataTableColumns<FileTreeRow> = [
   {
@@ -406,7 +273,7 @@ const fileTreeColumns: DataTableColumns<FileTreeRow> = [
     title: TEXT.size,
     key: "size",
     width: 120,
-    sorter: (a, b) => a.size - b.size,
+    sorter: (left, right) => left.size - right.size,
     render: (row) => formatBytes(row.size),
   },
   {
@@ -451,7 +318,7 @@ const fileColumns: DataTableColumns<FileRecord> = [
     title: TEXT.size,
     key: "size",
     width: 120,
-    sorter: (a, b) => a.size - b.size,
+    sorter: (left, right) => left.size - right.size,
     render: (row) => formatBytes(row.size),
   },
   {
@@ -536,241 +403,118 @@ const directoryColumns: DataTableColumns<DirectoryOverviewRow> = [
   },
 ];
 
-const directoryOverviewRows = computed<DirectoryOverviewRow[]>(() => {
-  if (!report.value) return [];
-
-  const buckets = new Map<string, DirectoryOverviewBucket>();
-
-  for (const file of report.value.scannedFiles) {
-    const parts = relativeParts(file.path, report.value.root);
-    if (parts.length === 0) continue;
-
-    if (parts.length === 1) {
-      buckets.set(`file:${parts[0]}`, {
-        key: `file:${parts[0]}`,
-        name: parts[0],
-        path: file.path,
-        kind: "file",
-        fileCount: 1,
-        totalSize: file.size,
-        preview: new Set(),
-      });
-      continue;
+watch(
+  reportKey,
+  async (key) => {
+    if (!key) {
+      resetDirectoryOverviewState();
+      resetFileTreeState();
+      return;
     }
 
-    const key = `dir:${parts[0]}`;
-    const bucket =
-      buckets.get(key) ??
-      {
-        key,
-        name: parts[0],
-        path: report.value.root ? `${report.value.root}/${parts[0]}` : parts[0],
-        kind: "directory" as const,
-        fileCount: 0,
-        totalSize: 0,
-        preview: new Set<string>(),
-      };
+    await loadDirectoryOverview();
+    scheduleFileTreeLoad(0);
+  },
+  { immediate: true }
+);
 
-    bucket.fileCount += 1;
-    bucket.totalSize += file.size;
-    if (parts[1]) {
-      bucket.preview.add(parts[1]);
-    }
-    buckets.set(key, bucket);
+watch([fileQuery, selectedCategory], () => {
+  if (!reportKey.value) {
+    return;
   }
-
-  for (const dirPath of report.value.analysis.emptyDirs) {
-    const parts = relativeParts(dirPath, report.value.root);
-    if (parts.length === 0) continue;
-
-    const key = `dir:${parts[0]}`;
-    const bucket =
-      buckets.get(key) ??
-      {
-        key,
-        name: parts[0],
-        path: report.value.root ? `${report.value.root}/${parts[0]}` : parts[0],
-        kind: "directory" as const,
-        fileCount: 0,
-        totalSize: 0,
-        preview: new Set<string>(),
-      };
-
-    if (parts[1]) {
-      bucket.preview.add(parts[1]);
-    }
-    buckets.set(key, bucket);
-  }
-
-  return Array.from(buckets.values())
-    .map((item) => ({
-      key: item.key,
-      name: item.name,
-      path: item.path,
-      kind: item.kind,
-      fileCount: item.fileCount,
-      totalSize: item.totalSize,
-      preview:
-        item.kind === "file"
-          ? "-"
-          : item.preview.size > 0
-            ? `${Array.from(item.preview).slice(0, 4).join("、")}${item.preview.size > 4 ? " 等" : ""}`
-            : "空目录",
-    }))
-    .sort((left, right) => {
-      if (left.kind !== right.kind) {
-        return left.kind === "directory" ? -1 : 1;
-      }
-      return left.name.localeCompare(right.name, "zh-CN");
-    });
+  scheduleFileTreeLoad(250);
 });
 
-const matchedScannedFiles = computed(() => {
-  const files = report.value?.scannedFiles ?? [];
-  const query = fileQuery.value.trim().toLowerCase();
-  return files
-    .filter((file) => {
-      const ext = (file.extension ?? "").toLowerCase();
-      const fullPath = file.path.toLowerCase();
-      const queryMatched = !query || fullPath.includes(query) || ext.includes(query);
-      const categoryMatched = matchesFileCategory(file, selectedCategory.value);
-      return queryMatched && categoryMatched;
-    })
-    .sort((a, b) => a.path.localeCompare(b.path, "zh-CN"));
+onBeforeUnmount(() => {
+  if (fileTreeTimer) {
+    clearTimeout(fileTreeTimer);
+    fileTreeTimer = null;
+  }
 });
 
-const fileTreeRows = computed<FileTreeRow[]>(() => {
-  if (!report.value) return [];
-
-  const root = report.value.root;
-  const nodeMap = new Map<
-    string,
-    {
-      row: FileTreeRow;
-      children: Map<string, string>;
-    }
-  >();
-
-  const roots: string[] = [];
-
-  const ensureDirectory = (parts: string[], depth: number) => {
-    const key = `dir:${parts.slice(0, depth + 1).join("/")}`;
-    if (!nodeMap.has(key)) {
-      const relativePath = parts.slice(0, depth + 1).join("/");
-      nodeMap.set(key, {
-        row: {
-          key,
-          name: parts[depth],
-          path: relativePath,
-          kind: "directory",
-          size: 0,
-          extension: "",
-          fileCount: 0,
-          children: [],
-        },
-        children: new Map(),
-      });
-
-      if (depth === 0) {
-        roots.push(key);
-      } else {
-        const parentKey = `dir:${parts.slice(0, depth).join("/")}`;
-        const parent = nodeMap.get(parentKey);
-        parent?.children.set(key, key);
-      }
-    }
-    return nodeMap.get(key)!;
+function emptyFileTreeResult(): FileTreeQueryResult {
+  return {
+    matchedCount: 0,
+    nodeCount: 0,
+    truncated: false,
+    rows: [],
   };
+}
 
-  for (const file of matchedScannedFiles.value) {
-    const parts = relativeParts(file.path, root);
-    if (parts.length === 0) continue;
+function resetDirectoryOverviewState() {
+  directoryOverviewRows.value = [];
+  directoryOverviewLoading.value = false;
+  directoryOverviewError.value = null;
+}
 
-    if (parts.length === 1) {
-      const key = `file:${parts[0]}`;
-      nodeMap.set(key, {
-        row: {
-          key,
-          name: parts[0],
-          path: parts[0],
-          kind: "file",
-          size: file.size,
-          extension: file.extension ?? "",
-          fileCount: 1,
-        },
-        children: new Map(),
-      });
-      roots.push(key);
-      continue;
-    }
+function resetFileTreeState() {
+  fileTreeResult.value = emptyFileTreeResult();
+  fileTreeLoading.value = false;
+  fileTreeError.value = null;
+}
 
-    for (let depth = 0; depth < parts.length - 1; depth += 1) {
-      const node = ensureDirectory(parts, depth);
-      node.row.size += file.size;
-      node.row.fileCount += 1;
-    }
-
-    const fileKey = `file:${parts.join("/")}`;
-    const fileRow: FileTreeRow = {
-      key: fileKey,
-      name: parts[parts.length - 1],
-      path: parts.join("/"),
-      kind: "file",
-      size: file.size,
-      extension: file.extension ?? "",
-      fileCount: 1,
-    };
-    nodeMap.set(fileKey, { row: fileRow, children: new Map() });
-
-    const parentKey = `dir:${parts.slice(0, parts.length - 1).join("/")}`;
-    nodeMap.get(parentKey)?.children.set(fileKey, fileKey);
+function scheduleFileTreeLoad(delayMs: number) {
+  if (fileTreeTimer) {
+    clearTimeout(fileTreeTimer);
   }
+  fileTreeTimer = setTimeout(() => {
+    fileTreeTimer = null;
+    void loadFileTree();
+  }, delayMs);
+}
 
-  const buildRows = (keys: string[]): FileTreeRow[] =>
-    keys
-      .map((key) => nodeMap.get(key))
-      .filter((value): value is NonNullable<typeof value> => Boolean(value))
-      .map((entry) => {
-        const childKeys = Array.from(entry.children.keys()).sort((left, right) => {
-          const leftRow = nodeMap.get(left)?.row;
-          const rightRow = nodeMap.get(right)?.row;
-          if (!leftRow || !rightRow) return 0;
-          if (leftRow.kind !== rightRow.kind) {
-            return leftRow.kind === "directory" ? -1 : 1;
-          }
-          if (leftRow.size !== rightRow.size) {
-            return rightRow.size - leftRow.size;
-          }
-          return leftRow.name.localeCompare(rightRow.name, "zh-CN");
-        });
+async function loadDirectoryOverview() {
+  const requestId = ++directoryOverviewRequestId;
+  directoryOverviewLoading.value = true;
+  directoryOverviewError.value = null;
 
-        return {
-          ...entry.row,
-          children: childKeys.length > 0 ? buildRows(childKeys) : undefined,
-        };
-      });
+  try {
+    const result = await invoke<DirectoryOverviewRow[]>("get_directory_overview");
+    if (requestId !== directoryOverviewRequestId) {
+      return;
+    }
+    directoryOverviewRows.value = result;
+  } catch (error) {
+    if (requestId !== directoryOverviewRequestId) {
+      return;
+    }
+    directoryOverviewRows.value = [];
+    directoryOverviewError.value =
+      typeof error === "string" ? error : (error as Error).message || String(error);
+  } finally {
+    if (requestId === directoryOverviewRequestId) {
+      directoryOverviewLoading.value = false;
+    }
+  }
+}
 
-  const rootRows = buildRows(
-    Array.from(new Set(roots)).sort((left, right) => {
-      const leftRow = nodeMap.get(left)?.row;
-      const rightRow = nodeMap.get(right)?.row;
-      if (!leftRow || !rightRow) return 0;
-      if (leftRow.kind !== rightRow.kind) {
-        return leftRow.kind === "directory" ? -1 : 1;
-      }
-      if (leftRow.size !== rightRow.size) {
-        return rightRow.size - leftRow.size;
-      }
-      return leftRow.name.localeCompare(rightRow.name, "zh-CN");
-    })
-  );
+async function loadFileTree() {
+  const requestId = ++fileTreeRequestId;
+  fileTreeLoading.value = true;
+  fileTreeError.value = null;
 
-  return rootRows;
-});
-
-const scannedFilesHint = computed(() => {
-  return `${TEXT.scannedFilesHintPrefix}${matchedScannedFiles.value.length}${TEXT.scannedFilesHintMiddle}${countTreeNodes(fileTreeRows.value)}${TEXT.scannedFilesHintSuffix}`;
-});
+  try {
+    const result = await invoke<FileTreeQueryResult>("query_file_tree", {
+      query: fileQuery.value.trim() || null,
+      category: selectedCategory.value,
+    });
+    if (requestId !== fileTreeRequestId) {
+      return;
+    }
+    fileTreeResult.value = result;
+  } catch (error) {
+    if (requestId !== fileTreeRequestId) {
+      return;
+    }
+    fileTreeResult.value = emptyFileTreeResult();
+    fileTreeError.value =
+      typeof error === "string" ? error : (error as Error).message || String(error);
+  } finally {
+    if (requestId === fileTreeRequestId) {
+      fileTreeLoading.value = false;
+    }
+  }
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -822,7 +566,9 @@ function formatSourceLabel(source?: string | null): string {
   return source;
 }
 
-function actionTagType(action: SuggestedAction): "default" | "success" | "warning" | "error" | "info" {
+function actionTagType(
+  action: SuggestedAction
+): "default" | "success" | "warning" | "error" | "info" {
   if (action === "keep") return "success";
   if (action === "review") return "info";
   if (action === "move") return "warning";
@@ -891,59 +637,6 @@ function duplicateTagLabel(path: string): string {
   if (action === "delete") return TEXT.deleteAdvice;
   return TEXT.duplicate;
 }
-
-function normalizePath(value: string): string {
-  return value.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
-}
-
-function relativeParts(fullPath: string, rootPath: string): string[] {
-  const normalizedRoot = normalizePath(rootPath);
-  const normalizedPath = normalizePath(fullPath);
-
-  if (normalizedPath === normalizedRoot) {
-    return [];
-  }
-
-  if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
-    return normalizedPath.slice(normalizedRoot.length + 1).split("/").filter(Boolean);
-  }
-
-  return normalizedPath.split("/").filter(Boolean);
-}
-
-function countTreeNodes(rows: FileTreeRow[]): number {
-  return rows.reduce((total, row) => {
-    return total + 1 + countTreeNodes(row.children ?? []);
-  }, 0);
-}
-
-function matchesFileCategory(file: FileRecord, category: FileCategory): boolean {
-  if (category === "all") return true;
-
-  const ext = (file.extension ?? "").toLowerCase();
-  if (!ext) {
-    return category === "other";
-  }
-
-  if (category === "image") return IMAGE_EXTENSIONS.has(ext);
-  if (category === "video") return VIDEO_EXTENSIONS.has(ext);
-  if (category === "audio") return AUDIO_EXTENSIONS.has(ext);
-  if (category === "archive") return ARCHIVE_EXTENSIONS.has(ext);
-  if (category === "executable") return EXECUTABLE_EXTENSIONS.has(ext);
-  if (category === "document") return DOCUMENT_EXTENSIONS.has(ext);
-  if (category === "code") return CODE_EXTENSIONS.has(ext);
-
-  return !(
-    IMAGE_EXTENSIONS.has(ext) ||
-    VIDEO_EXTENSIONS.has(ext) ||
-    AUDIO_EXTENSIONS.has(ext) ||
-    ARCHIVE_EXTENSIONS.has(ext) ||
-    EXECUTABLE_EXTENSIONS.has(ext) ||
-    DOCUMENT_EXTENSIONS.has(ext) ||
-    CODE_EXTENSIONS.has(ext)
-  );
-}
-
 </script>
 
 <template>
@@ -968,25 +661,37 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
               <n-statistic :label="TEXT.totalSize" :value="formatBytes(report.analysis.totalSize)" />
             </n-gi>
             <n-gi>
-              <n-statistic :label="TEXT.duplicateGroups" :value="report.dedup.groups.length" />
+              <n-statistic :label="TEXT.duplicateGroups" :value="duplicateGroupCount" />
             </n-gi>
             <n-gi>
-              <n-statistic :label="TEXT.suggestionCount" :value="report.advisor.suggestions.length" />
+              <n-statistic :label="TEXT.suggestionCount" :value="suggestionCount" />
             </n-gi>
           </n-grid>
         </n-space>
       </n-card>
 
       <n-card :title="TEXT.directoryOverview">
-        <n-data-table
-          v-if="directoryOverviewRows.length > 0"
-          :columns="directoryColumns"
-          :data="directoryOverviewRows"
-          :max-height="320"
-          size="small"
-          :bordered="false"
-        />
-        <n-empty v-else :description="TEXT.emptyOverview" />
+        <n-space vertical :size="12">
+          <n-alert v-if="directoryOverviewError" type="error" :title="TEXT.directoryOverviewFailed">
+            {{ directoryOverviewError }}
+          </n-alert>
+          <n-text v-else-if="directoryOverviewLoading" depth="3">
+            {{ TEXT.loadingDirectoryOverview }}
+          </n-text>
+          <n-data-table
+            v-if="directoryOverviewRows.length > 0"
+            :columns="directoryColumns"
+            :data="directoryOverviewRows"
+            :loading="directoryOverviewLoading"
+            :max-height="320"
+            size="small"
+            :bordered="false"
+          />
+          <n-empty
+            v-else-if="!directoryOverviewLoading && !directoryOverviewError"
+            :description="TEXT.emptyOverview"
+          />
+        </n-space>
       </n-card>
 
       <n-card :title="TEXT.scannedFiles">
@@ -1007,14 +712,35 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
               />
             </n-gi>
           </n-grid>
-          <n-text depth="3">{{ scannedFilesHint }}</n-text>
+
+          <n-alert v-if="fileTreeError" type="error" :title="TEXT.fileTreeFailed">
+            {{ fileTreeError }}
+          </n-alert>
+          <n-text v-else-if="fileTreeLoading" depth="3">{{ TEXT.loadingFileTree }}</n-text>
+          <n-text v-if="!fileTreeError" depth="3">{{ scannedFilesHint }}</n-text>
+          <n-alert v-if="fileTreeResult.truncated" type="warning">
+            {{ TEXT.fileTreeTruncated }}
+          </n-alert>
+          <n-alert
+            v-if="!shouldExpandFileTree && fileTreeResult.rows.length > 0"
+            type="info"
+          >
+            {{ TEXT.fileTreeCollapsed }}
+          </n-alert>
+
           <n-data-table
+            v-if="fileTreeRows.length > 0"
             :columns="fileTreeColumns"
             :data="fileTreeRows"
+            :loading="fileTreeLoading"
             :max-height="480"
             size="small"
             :bordered="false"
-            default-expand-all
+            :default-expand-all="shouldExpandFileTree"
+          />
+          <n-empty
+            v-else-if="!fileTreeLoading && !fileTreeError"
+            :description="TEXT.fileTreeEmpty"
           />
         </n-space>
       </n-card>
@@ -1040,39 +766,51 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
       </n-card>
 
       <n-card v-if="report.analysis.largeFiles.length > 0" :title="TEXT.largeFiles">
-        <n-data-table
-          :columns="fileColumns"
-          :data="report.analysis.largeFiles.slice(0, 50)"
-          :max-height="280"
-          size="small"
-          :bordered="false"
-        />
+        <n-space vertical :size="12">
+          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+          <n-data-table
+            :columns="fileColumns"
+            :data="report.analysis.largeFiles"
+            :max-height="280"
+            size="small"
+            :bordered="false"
+          />
+        </n-space>
       </n-card>
 
       <n-card v-if="report.analysis.temporaryFiles.length > 0" :title="TEXT.temporaryFiles">
-        <n-data-table
-          :columns="fileColumns"
-          :data="report.analysis.temporaryFiles.slice(0, 50)"
-          :max-height="280"
-          size="small"
-          :bordered="false"
-        />
+        <n-space vertical :size="12">
+          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+          <n-data-table
+            :columns="fileColumns"
+            :data="report.analysis.temporaryFiles"
+            :max-height="280"
+            size="small"
+            :bordered="false"
+          />
+        </n-space>
       </n-card>
 
       <n-card v-if="report.analysis.archiveFiles.length > 0" :title="TEXT.archiveFiles">
-        <n-data-table
-          :columns="fileColumns"
-          :data="report.analysis.archiveFiles.slice(0, 50)"
-          :max-height="280"
-          size="small"
-          :bordered="false"
-        />
+        <n-space vertical :size="12">
+          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+          <n-data-table
+            :columns="fileColumns"
+            :data="report.analysis.archiveFiles"
+            :max-height="280"
+            size="small"
+            :bordered="false"
+          />
+        </n-space>
       </n-card>
 
       <n-card v-if="report.dedup.groups.length > 0" :title="TEXT.duplicateGroups">
         <n-space vertical :size="12">
+          <n-alert v-if="report.dedup.truncated" type="info">
+            {{ TEXT.duplicateGroupsLimited }}
+          </n-alert>
           <n-card
-            v-for="(group, idx) in report.dedup.groups.slice(0, 10)"
+            v-for="(group, idx) in report.dedup.groups"
             :key="group.hash"
             :title="`${TEXT.groupPrefix} ${idx + 1} ${TEXT.groupSuffix} (${formatBytes(group.totalSize)})`"
             size="small"
@@ -1092,12 +830,17 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
       </n-card>
 
       <n-card :title="TEXT.aiSummary">
-        <n-tag :type="report.advisor.source.startsWith('remote') ? 'info' : 'default'" size="small">
-          {{ advisorSourceLabel }}
-        </n-tag>
-        <n-text style="display: block; margin-top: 12px; white-space: pre-wrap">
-          {{ report.advisor.summary }}
-        </n-text>
+        <n-space vertical :size="12">
+          <n-tag :type="report.advisor.source.startsWith('remote') ? 'info' : 'default'" size="small">
+            {{ advisorSourceLabel }}
+          </n-tag>
+          <n-alert v-if="report.advisor.truncated" type="info">
+            {{ TEXT.suggestionsLimited }}
+          </n-alert>
+          <n-text style="display: block; white-space: pre-wrap">
+            {{ report.advisor.summary }}
+          </n-text>
+        </n-space>
       </n-card>
 
       <n-button type="primary" @click="goToCleanup" style="width: 100%">
@@ -1125,7 +868,7 @@ function matchesFileCategory(file: FileRecord, category: FileCategory): boolean 
               type="warning"
               :title="TEXT.aiInspectFallbackTitle"
             >
-              <div>{{ aiInsight.fallbackReason || '-' }}</div>
+              <div>{{ aiInsight.fallbackReason || "-" }}</div>
             </n-alert>
 
             <n-alert

@@ -13,6 +13,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ai::explain_file_with_ai,
             commands::scan::start_scan,
+            commands::scan::get_directory_overview,
+            commands::scan::query_file_tree,
             commands::scan::cancel_scan,
             commands::scan::diagnose_path,
             commands::cleanup::execute_cleanup,

@@ -59,6 +59,8 @@ const TEXT = {
   executionResult: "\u6267\u884C\u7ED3\u679C",
   success: "\u6210\u529F",
   failed: "\u5931\u8D25",
+  suggestionsLimited:
+    "\u5F53\u524D\u6E05\u7406\u9875\u4EC5\u5C55\u793A\u524D 1000 \u6761 AI \u5EFA\u8BAE\uFF0C\u5982\u679C\u662F\u5168\u76D8\u626B\u63CF\uFF0C\u8BF7\u4F18\u5148\u7F29\u5C0F\u8303\u56F4\u540E\u518D\u590D\u6838\u3002",
 };
 
 const actionLabels: Record<string, string> = {
@@ -90,6 +92,9 @@ const suggestions = computed(() =>
   (report.value?.advisor.suggestions ?? []).filter(
     (item) => item.action === "delete" || item.action === "move"
   )
+);
+const totalSuggestionCount = computed(
+  () => report.value?.advisor.suggestionCount ?? report.value?.advisor.suggestions.length ?? 0
 );
 const protectedSuggestionCount = computed(
   () =>
@@ -212,9 +217,15 @@ async function handleExecute() {
       </n-card>
 
       <n-card :title="TEXT.chooseFiles">
+        <n-alert v-if="report.advisor.truncated" type="warning" style="margin-bottom: 12px">
+          {{ TEXT.suggestionsLimited }}
+        </n-alert>
         <n-alert v-if="protectedSuggestionCount > 0" type="info" style="margin-bottom: 12px">
           {{ TEXT.protectedNotice }}
         </n-alert>
+        <n-text depth="3" style="display: block; margin-bottom: 12px">
+          {{ totalSuggestionCount }} 条建议中，当前可执行列表展示 {{ suggestions.length }} 条。
+        </n-text>
         <n-data-table
           :columns="columns"
           :data="suggestions"

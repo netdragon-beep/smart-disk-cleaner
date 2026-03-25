@@ -52,6 +52,8 @@ const TEXT = {
   goCleanup: "\u524D\u5F80\u6E05\u7406",
   groupPrefix: "\u7B2C",
   groupSuffix: "\u7EC4",
+  suggestionsLimited: "\u5EFA\u8BAE\u5217\u8868\u5DF2\u622A\u65AD\uFF0C\u4EC5\u5C55\u793A\u524D 1000 \u6761\u3002",
+  duplicateGroupsLimited: "\u91CD\u590D\u6587\u4EF6\u7EC4\u5DF2\u622A\u65AD\uFF0C\u4EC5\u5C55\u793A\u524D 10 \u7EC4\u3002",
 };
 
 use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
@@ -59,6 +61,12 @@ use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer
 const router = useRouter();
 const store = useAppStore();
 const report = computed(() => store.report);
+const duplicateGroupCount = computed(
+  () => report.value?.dedup.groupCount ?? report.value?.dedup.groups.length ?? 0
+);
+const suggestionCount = computed(
+  () => report.value?.advisor.suggestionCount ?? report.value?.advisor.suggestions.length ?? 0
+);
 
 const suggestionByPath = computed(() => {
   const map = new Map<string, FileSuggestion>();
@@ -178,10 +186,10 @@ function duplicateTagLabel(path: string): string {
             <n-statistic :label="TEXT.totalSize" :value="formatBytes(report.analysis.totalSize)" />
           </n-gi>
           <n-gi>
-            <n-statistic :label="TEXT.duplicateGroups" :value="report.dedup.groups.length" />
+            <n-statistic :label="TEXT.duplicateGroups" :value="duplicateGroupCount" />
           </n-gi>
           <n-gi>
-            <n-statistic :label="TEXT.suggestionCount" :value="report.advisor.suggestions.length" />
+            <n-statistic :label="TEXT.suggestionCount" :value="suggestionCount" />
           </n-gi>
         </n-grid>
       </n-card>
@@ -202,8 +210,11 @@ function duplicateTagLabel(path: string): string {
 
       <n-card :title="TEXT.duplicateGroups" v-if="report.dedup.groups.length > 0">
         <n-space vertical :size="12">
+          <n-text v-if="report.dedup.truncated" depth="3">
+            {{ TEXT.duplicateGroupsLimited }}
+          </n-text>
           <n-card
-            v-for="(group, idx) in report.dedup.groups.slice(0, 10)"
+            v-for="(group, idx) in report.dedup.groups"
             :key="group.hash"
             :title="`${TEXT.groupPrefix} ${idx + 1} ${TEXT.groupSuffix} (${formatBytes(group.totalSize)})`"
             size="small"
@@ -229,6 +240,9 @@ function duplicateTagLabel(path: string): string {
         <n-tag :type="report.advisor.source.startsWith('remote') ? 'info' : 'default'" size="small">
           {{ advisorSourceLabel }}
         </n-tag>
+        <n-text v-if="report.advisor.truncated" depth="3" style="display: block; margin-top: 12px">
+          {{ TEXT.suggestionsLimited }}
+        </n-text>
         <n-text style="display: block; margin-top: 12px; white-space: pre-wrap">
           {{ report.advisor.summary }}
         </n-text>

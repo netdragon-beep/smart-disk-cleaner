@@ -52,6 +52,8 @@ export interface DuplicateGroup {
 export interface DedupResult {
   groups: DuplicateGroup[];
   failures: PathIssue[];
+  groupCount?: number;
+  truncated?: boolean;
 }
 
 export type SuggestedAction = "delete" | "keep" | "move" | "review";
@@ -69,6 +71,8 @@ export interface AdvisorOutput {
   source: string;
   summary: string;
   suggestions: FileSuggestion[];
+  suggestionCount?: number;
+  truncated?: boolean;
 }
 
 export interface FileAiInsight {
@@ -93,6 +97,34 @@ export interface ScanReport {
   modules: ScanModuleSummary[];
   advisor: AdvisorOutput;
   failures: PathIssue[];
+}
+
+export interface FileTreeRow {
+  key: string;
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+  size: number;
+  extension: string;
+  fileCount: number;
+  children?: FileTreeRow[];
+}
+
+export interface DirectoryOverviewRow {
+  key: string;
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+  fileCount: number;
+  totalSize: number;
+  preview: string;
+}
+
+export interface FileTreeQueryResult {
+  matchedCount: number;
+  nodeCount: number;
+  truncated: boolean;
+  rows: FileTreeRow[];
 }
 
 export type ExecutionMode = "recycle" | "move";

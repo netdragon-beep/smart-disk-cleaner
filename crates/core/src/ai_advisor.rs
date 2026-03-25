@@ -53,6 +53,15 @@ pub async fn build_advice(
     })
 }
 
+pub fn build_local_advice(analysis: &AnalysisResult, dedup: &DedupResult) -> AdvisorOutput {
+    let suggestions = build_rule_based_suggestions(analysis, dedup);
+    AdvisorOutput {
+        source: "local_rules".to_string(),
+        summary: build_display_summary(analysis, dedup, &suggestions),
+        suggestions,
+    }
+}
+
 pub async fn explain_file(
     report: &ScanReport,
     path: &Path,
