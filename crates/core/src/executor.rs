@@ -333,6 +333,7 @@ mod tests {
     fn empty_report(suggestions: Vec<FileSuggestion>) -> ScanReport {
         ScanReport {
             generated_at: Utc::now(),
+            scan_duration_ms: 0,
             root: PathBuf::from(r"E:\test"),
             scanned_files: Vec::new(),
             analysis: AnalysisResult {

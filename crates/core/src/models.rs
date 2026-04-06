@@ -140,10 +140,56 @@ pub struct FileAiInsight {
     pub fallback_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessSuggestedAction {
+    SafeToEnd,
+    EndAfterSave,
+    Review,
+    AvoidEnd,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessRecord {
+    pub pid: u32,
+    pub parent_pid: Option<u32>,
+    pub name: String,
+    pub exe_path: Option<PathBuf>,
+    pub command: Vec<String>,
+    pub cpu_usage: f32,
+    pub memory_bytes: u64,
+    pub virtual_memory_bytes: u64,
+    pub disk_read_bytes: u64,
+    pub disk_written_bytes: u64,
+    pub run_time_seconds: u64,
+    pub status: String,
+    pub category: String,
+    pub is_critical: bool,
+    pub resource_score: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessAiInsight {
+    pub pid: u32,
+    pub name: String,
+    pub source: String,
+    pub summary: String,
+    pub suggested_action: ProcessSuggestedAction,
+    pub risk: RiskLevel,
+    pub reason: String,
+    pub remote_attempted: bool,
+    pub used_fallback: bool,
+    pub fallback_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanReport {
     pub generated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub scan_duration_ms: u64,
     pub root: PathBuf,
     pub scanned_files: Vec<FileRecord>,
     pub analysis: AnalysisResult,

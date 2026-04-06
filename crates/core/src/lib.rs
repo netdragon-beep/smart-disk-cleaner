@@ -5,5 +5,6 @@ pub mod dedup;
 pub mod diagnostics;
 pub mod executor;
 pub mod models;
+pub mod process_advisor;
 pub mod reporter;
 pub mod scanner;

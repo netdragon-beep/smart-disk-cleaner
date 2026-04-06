@@ -12,6 +12,9 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::ai::explain_file_with_ai,
+            commands::process::list_top_processes,
+            commands::process::explain_process_with_ai,
+            commands::process::terminate_process,
             commands::scan::start_scan,
             commands::scan::get_directory_overview,
             commands::scan::query_file_tree,

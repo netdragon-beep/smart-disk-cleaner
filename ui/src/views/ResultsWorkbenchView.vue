@@ -17,6 +17,7 @@ import {
   NStatistic,
   NTag,
   NText,
+  useMessage,
   type DataTableColumns,
 } from "naive-ui";
 import VChart from "vue-echarts";
@@ -150,7 +151,8 @@ use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer
 
 const router = useRouter();
 const store = useAppStore();
-const { loading: aiLoading, error: aiError, explainFile } = useAiFile();
+const { requestFileInsight } = useAiFile();
+const message = useMessage();
 const report = computed(() => store.report);
 const reportKey = computed(() =>
   report.value ? `${report.value.generatedAt}:${report.value.root}` : ""
@@ -159,8 +161,10 @@ const reportKey = computed(() =>
 const fileQuery = ref("");
 const selectedCategory = ref<FileCategory>("all");
 const aiInsightVisible = ref(false);
-const aiInsight = ref<FileAiInsight | null>(null);
 const selectedAiPath = ref("");
+const fileAiInsightCache = ref<Record<string, FileAiInsight>>({});
+const fileAiInsightPending = ref<Record<string, boolean>>({});
+const fileAiInsightErrors = ref<Record<string, string>>({});
 
 const directoryOverviewRows = ref<DirectoryOverviewRow[]>([]);
 const directoryOverviewLoading = ref(false);
@@ -173,6 +177,16 @@ const fileTreeError = ref<string | null>(null);
 let fileTreeTimer: ReturnType<typeof setTimeout> | null = null;
 let fileTreeRequestId = 0;
 let directoryOverviewRequestId = 0;
+
+const selectedAiInsight = computed(() =>
+  selectedAiPath.value ? fileAiInsightCache.value[selectedAiPath.value] ?? null : null
+);
+const selectedAiInsightPending = computed(() =>
+  selectedAiPath.value ? Boolean(fileAiInsightPending.value[selectedAiPath.value]) : false
+);
+const selectedAiInsightError = computed(() =>
+  selectedAiPath.value ? fileAiInsightErrors.value[selectedAiPath.value] ?? null : null
+);
 
 const suggestionByPath = computed(() => {
   const map = new Map<string, FileSuggestion>();
@@ -189,6 +203,7 @@ const duplicateGroupCount = computed(
 const suggestionCount = computed(
   () => report.value?.advisor.suggestionCount ?? report.value?.advisor.suggestions.length ?? 0
 );
+const scanDurationLabel = computed(() => formatDurationMs(report.value?.scanDurationMs ?? 0));
 
 const moduleCards = computed(() =>
   (report.value?.modules ?? []).map((item: ScanModuleSummary) => ({
@@ -299,11 +314,10 @@ const fileTreeColumns: DataTableColumns<FileTreeRow> = [
           size: "tiny",
           secondary: true,
           type: "primary",
-          loading: aiLoading.value && selectedAiPath.value === row.path,
-          disabled: aiLoading.value && selectedAiPath.value !== row.path,
-          onClick: () => void inspectFileWithAi(row.path),
+          loading: Boolean(fileAiInsightPending.value[row.path]),
+          onClick: () => void handleFileAiAction(row.path),
         },
-        () => TEXT.aiInspect
+        () => fileAiButtonText(row.path)
       ),
   },
 ];
@@ -338,11 +352,10 @@ const fileColumns: DataTableColumns<FileRecord> = [
           size: "tiny",
           secondary: true,
           type: "primary",
-          loading: aiLoading.value && selectedAiPath.value === row.path,
-          disabled: aiLoading.value && selectedAiPath.value !== row.path,
-          onClick: () => void inspectFileWithAi(row.path),
+          loading: Boolean(fileAiInsightPending.value[row.path]),
+          onClick: () => void handleFileAiAction(row.path),
         },
-        () => TEXT.aiInspect
+        () => fileAiButtonText(row.path)
       ),
   },
 ];
@@ -394,11 +407,10 @@ const directoryColumns: DataTableColumns<DirectoryOverviewRow> = [
           size: "tiny",
           secondary: true,
           type: "primary",
-          loading: aiLoading.value && selectedAiPath.value === row.path,
-          disabled: aiLoading.value && selectedAiPath.value !== row.path,
-          onClick: () => void inspectFileWithAi(row.path),
+          loading: Boolean(fileAiInsightPending.value[row.path]),
+          onClick: () => void handleFileAiAction(row.path),
         },
-        () => TEXT.aiInspect
+        () => fileAiButtonText(row.path)
       ),
   },
 ];
@@ -525,6 +537,22 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatDurationMs(durationMs: number): string {
+  if (durationMs < 1000) return `${durationMs} ms`;
+
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  if (remainMinutes > 0) return `${hours} 小时 ${remainMinutes} 分`;
+  return `${hours} 小时`;
+}
+
 function moduleLabel(kind: ScanModuleKind): string {
   if (kind === "duplicate_files") return TEXT.duplicateFiles;
   if (kind === "large_files") return TEXT.largeFiles;
@@ -547,14 +575,78 @@ function goToCleanup() {
   router.push({ name: "cleanup" });
 }
 
-async function inspectFileWithAi(path: string) {
-  selectedAiPath.value = path;
-  aiInsightVisible.value = true;
-  aiInsight.value = null;
-  const result = await explainFile(path, store.config);
-  if (result) {
-    aiInsight.value = result;
+function fileAiButtonText(path: string): string {
+  if (fileAiInsightPending.value[path]) {
+    return "解读中";
   }
+  if (fileAiInsightCache.value[path]) {
+    return "查看解读";
+  }
+  if (fileAiInsightErrors.value[path]) {
+    return "重试解读";
+  }
+  return TEXT.aiInspect;
+}
+
+async function queueFileInsight(path: string, force = false) {
+  if (fileAiInsightPending.value[path]) {
+    return;
+  }
+  if (!force && fileAiInsightCache.value[path]) {
+    return;
+  }
+
+  fileAiInsightPending.value = {
+    ...fileAiInsightPending.value,
+    [path]: true,
+  };
+
+  const nextErrors = { ...fileAiInsightErrors.value };
+  delete nextErrors[path];
+  fileAiInsightErrors.value = nextErrors;
+
+  try {
+    const result = await requestFileInsight(path, store.config);
+    fileAiInsightCache.value = {
+      ...fileAiInsightCache.value,
+      [path]: result,
+    };
+  } catch (error: any) {
+    fileAiInsightErrors.value = {
+      ...fileAiInsightErrors.value,
+      [path]: typeof error === "string" ? error : error?.message || String(error),
+    };
+  } finally {
+    fileAiInsightPending.value = {
+      ...fileAiInsightPending.value,
+      [path]: false,
+    };
+  }
+}
+
+async function handleFileAiAction(path: string) {
+  selectedAiPath.value = path;
+
+  if (fileAiInsightCache.value[path] || fileAiInsightErrors.value[path]) {
+    aiInsightVisible.value = true;
+    return;
+  }
+
+  if (fileAiInsightPending.value[path]) {
+    message.info("这个项目正在后台解读，稍后再点查看结果。");
+    return;
+  }
+
+  void queueFileInsight(path);
+  message.info("已开始后台解读，你可以继续查看其它文件或目录。");
+}
+
+async function retrySelectedFileInsight() {
+  if (!selectedAiPath.value) {
+    return;
+  }
+  void queueFileInsight(selectedAiPath.value, true);
+  message.info("已重新加入后台解读队列。");
 }
 
 function formatSourceLabel(source?: string | null): string {
@@ -653,7 +745,7 @@ function duplicateTagLabel(path: string): string {
       <n-card :title="TEXT.overview">
         <n-space vertical :size="16">
           <n-text depth="3">{{ TEXT.rootPath }}：{{ report.root }}</n-text>
-          <n-grid :cols="4" :x-gap="12">
+          <n-grid :cols="5" :x-gap="12">
             <n-gi>
               <n-statistic :label="TEXT.totalFiles" :value="report.analysis.totalFiles" />
             </n-gi>
@@ -665,6 +757,9 @@ function duplicateTagLabel(path: string): string {
             </n-gi>
             <n-gi>
               <n-statistic :label="TEXT.suggestionCount" :value="suggestionCount" />
+            </n-gi>
+            <n-gi>
+              <n-statistic label="扫描耗时" :value="scanDurationLabel" />
             </n-gi>
           </n-grid>
         </n-space>
@@ -854,25 +949,25 @@ function duplicateTagLabel(path: string): string {
           <n-text depth="3">{{ TEXT.aiInspectHint }}</n-text>
           <n-text style="word-break: break-all">{{ selectedAiPath }}</n-text>
 
-          <n-alert v-if="aiError" type="error" :title="TEXT.aiInspectFailed">
-            {{ aiError }}
+          <n-alert v-if="selectedAiInsightError" type="error" :title="TEXT.aiInspectFailed">
+            {{ selectedAiInsightError }}
           </n-alert>
 
-          <template v-else-if="aiLoading">
-            <n-text>{{ TEXT.aiInspectLoading }}</n-text>
+          <template v-else-if="selectedAiInsightPending">
+            <n-text>后台正在解读这个项目，你可以先关闭窗口继续查看其它内容，稍后再回来查看结果。</n-text>
           </template>
 
-          <template v-else-if="aiInsight">
+          <template v-else-if="selectedAiInsight">
             <n-alert
-              v-if="aiInsight.usedFallback"
+              v-if="selectedAiInsight.usedFallback"
               type="warning"
               :title="TEXT.aiInspectFallbackTitle"
             >
-              <div>{{ aiInsight.fallbackReason || "-" }}</div>
+              <div>{{ selectedAiInsight.fallbackReason || "-" }}</div>
             </n-alert>
 
             <n-alert
-              v-else-if="!aiInsight.remoteAttempted && aiInsight.source === 'local_rules'"
+              v-else-if="!selectedAiInsight.remoteAttempted && selectedAiInsight.source === 'local_rules'"
               type="info"
               :title="TEXT.aiInspectLocalOnlyTitle"
             >
@@ -880,48 +975,48 @@ function duplicateTagLabel(path: string): string {
             </n-alert>
 
             <n-alert
-              v-else-if="aiInsight.source.startsWith('remote')"
+              v-else-if="selectedAiInsight.source.startsWith('remote')"
               type="success"
               :title="TEXT.aiInspectRemoteSuccess"
             >
-              {{ formatSourceLabel(aiInsight.source) }}
+              {{ formatSourceLabel(selectedAiInsight.source) }}
             </n-alert>
 
             <n-space>
               <n-tag size="small" type="default">
-                {{ aiTargetKindLabel(aiInsight.targetKind) }}
+                {{ aiTargetKindLabel(selectedAiInsight.targetKind) }}
               </n-tag>
-              <n-tag size="small" :type="aiInsight.source.startsWith('remote') ? 'info' : 'default'">
-                {{ formatSourceLabel(aiInsight.source) }}
+              <n-tag size="small" :type="selectedAiInsight.source.startsWith('remote') ? 'info' : 'default'">
+                {{ formatSourceLabel(selectedAiInsight.source) }}
               </n-tag>
-              <n-tag size="small" :type="actionTagType(aiInsight.suggestedAction)">
-                {{ actionLabel(aiInsight.suggestedAction) }}
+              <n-tag size="small" :type="actionTagType(selectedAiInsight.suggestedAction)">
+                {{ actionLabel(selectedAiInsight.suggestedAction) }}
               </n-tag>
-              <n-tag size="small" :type="riskTagType(aiInsight.risk)">
-                {{ riskLabel(aiInsight.risk) }}
+              <n-tag size="small" :type="riskTagType(selectedAiInsight.risk)">
+                {{ riskLabel(selectedAiInsight.risk) }}
               </n-tag>
             </n-space>
 
             <n-card size="small" embedded>
               <n-text depth="3">
-                {{ shouldShowSeparateReasonCard(aiInsight) ? TEXT.aiInspectSummary : TEXT.aiInspectReason }}
+                {{ shouldShowSeparateReasonCard(selectedAiInsight) ? TEXT.aiInspectSummary : TEXT.aiInspectReason }}
               </n-text>
               <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
-                {{ aiInsight.summary }}
+                {{ selectedAiInsight.summary }}
               </n-text>
             </n-card>
 
-            <n-card v-if="shouldShowSeparateReasonCard(aiInsight)" size="small" embedded>
+            <n-card v-if="shouldShowSeparateReasonCard(selectedAiInsight)" size="small" embedded>
               <n-text depth="3">{{ TEXT.aiInspectReason }}</n-text>
               <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
-                {{ aiInsight.reason }}
+                {{ selectedAiInsight.reason }}
               </n-text>
             </n-card>
 
-            <n-card v-if="aiInsight.usedFallback && aiInsight.fallbackReason" size="small" embedded>
+            <n-card v-if="selectedAiInsight.usedFallback && selectedAiInsight.fallbackReason" size="small" embedded>
               <n-text depth="3">{{ TEXT.aiInspectFallbackReason }}</n-text>
               <n-text style="display: block; margin-top: 8px; white-space: pre-wrap">
-                {{ aiInsight.fallbackReason }}
+                {{ selectedAiInsight.fallbackReason }}
               </n-text>
             </n-card>
           </template>
@@ -933,9 +1028,9 @@ function duplicateTagLabel(path: string): string {
             <n-button
               type="primary"
               secondary
-              :loading="aiLoading"
+              :loading="selectedAiInsightPending"
               :disabled="!selectedAiPath"
-              @click="inspectFileWithAi(selectedAiPath)"
+              @click="retrySelectedFileInsight"
             >
               {{ TEXT.retry }}
             </n-button>

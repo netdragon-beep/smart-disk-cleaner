@@ -88,8 +88,46 @@ export interface FileAiInsight {
   fallbackReason: string | null;
 }
 
+export type ProcessSuggestedAction =
+  | "safe_to_end"
+  | "end_after_save"
+  | "review"
+  | "avoid_end";
+
+export interface ProcessRecord {
+  pid: number;
+  parentPid: number | null;
+  name: string;
+  exePath: string | null;
+  command: string[];
+  cpuUsage: number;
+  memoryBytes: number;
+  virtualMemoryBytes: number;
+  diskReadBytes: number;
+  diskWrittenBytes: number;
+  runTimeSeconds: number;
+  status: string;
+  category: string;
+  isCritical: boolean;
+  resourceScore: number;
+}
+
+export interface ProcessAiInsight {
+  pid: number;
+  name: string;
+  source: string;
+  summary: string;
+  suggestedAction: ProcessSuggestedAction;
+  risk: RiskLevel;
+  reason: string;
+  remoteAttempted: boolean;
+  usedFallback: boolean;
+  fallbackReason: string | null;
+}
+
 export interface ScanReport {
   generatedAt: string;
+  scanDurationMs: number;
   root: string;
   scannedFiles: FileRecord[];
   analysis: AnalysisResult;

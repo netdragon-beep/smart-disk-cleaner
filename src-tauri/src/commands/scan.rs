@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 use tauri::{ipc::Channel, State};
 
 const FRONTEND_LARGE_FILES_LIMIT: usize = 50;
@@ -67,6 +68,7 @@ pub struct FrontendDedupResult {
 #[serde(rename_all = "camelCase")]
 pub struct FrontendScanReport {
     generated_at: chrono::DateTime<chrono::Utc>,
+    scan_duration_ms: u64,
     root: PathBuf,
     scanned_files: Vec<FileRecord>,
     analysis: AnalysisResult,
@@ -117,6 +119,7 @@ pub async fn start_scan(
     state: State<'_, AppState>,
 ) -> Result<FrontendScanReport, String> {
     let root = PathBuf::from(&path);
+    let started_at = Instant::now();
     let config = state.load_config();
     let cancel = state.cancel_flag.clone();
     cancel.store(false, Ordering::Relaxed);
@@ -189,6 +192,7 @@ pub async fn start_scan(
 
     let report = ScanReport {
         generated_at: Utc::now(),
+        scan_duration_ms: started_at.elapsed().as_millis() as u64,
         root: scan.root.clone(),
         scanned_files: scan.files.clone(),
         modules: build_scan_modules(&analysis, &dedup),
@@ -257,6 +261,7 @@ pub async fn diagnose_path(path: String, operation: String) -> Result<PathDiagno
 fn summarize_report_for_frontend(report: &ScanReport) -> FrontendScanReport {
     FrontendScanReport {
         generated_at: report.generated_at,
+        scan_duration_ms: report.scan_duration_ms,
         root: report.root.clone(),
         scanned_files: Vec::new(),
         analysis: AnalysisResult {

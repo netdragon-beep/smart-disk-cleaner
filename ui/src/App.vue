@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onErrorCaptured, onMounted, ref, watch } from "vue";
+import { computed, h, onErrorCaptured, onMounted, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import {
   NAlert,
@@ -11,6 +11,7 @@ import {
   NMessageProvider,
   NLayoutContent,
   NSpace,
+  NTooltip,
   zhCN,
   dateZhCN,
   darkTheme,
@@ -33,12 +34,40 @@ const themeOverride = computed(() =>
 );
 const viewKey = computed(() => `${route.fullPath}:${renderEpoch.value}`);
 
+function buildMenuOption(label: string, key: string, description: string): MenuOption {
+  return {
+    key,
+    label: () =>
+      h(
+        NTooltip,
+        {
+          delay: 600,
+          placement: "right",
+          style: "max-width: 260px;",
+        },
+        {
+          trigger: () =>
+            h(
+              "div",
+              {
+                style:
+                  "display: flex; align-items: center; min-width: 0; width: 100%;",
+              },
+              label
+            ),
+          default: () => description,
+        }
+      ),
+  };
+}
+
 const menuOptions: MenuOption[] = [
-  { label: "\u626B\u63CF", key: "scan" },
-  { label: "\u7ED3\u679C", key: "results" },
-  { label: "\u6E05\u7406", key: "cleanup" },
-  { label: "\u5386\u53F2", key: "history" },
-  { label: "\u8BBE\u7F6E", key: "settings" },
+  buildMenuOption("\u78C1\u76D8\u626B\u63CF", "scan", "\u9009\u62E9\u4E00\u4E2A\u78C1\u76D8\u6216\u76EE\u5F55\uFF0C\u5F00\u59CB\u5206\u6790\u7A7A\u95F4\u5360\u7528\u4E0E\u53EF\u6E05\u7406\u5185\u5BB9\u3002"),
+  buildMenuOption("\u8FDB\u7A0B\u8BCA\u65AD", "processes", "\u67E5\u770B\u9AD8\u5360\u7528\u8FDB\u7A0B\uFF0C\u7406\u89E3\u5B83\u4EEC\u7684\u7528\u9014\uFF0C\u5E76\u51B3\u5B9A\u662F\u5426\u9002\u5408\u7ED3\u675F\u3002"),
+  buildMenuOption("\u626B\u63CF\u7ED3\u679C", "results", "\u6309\u6587\u4EF6\u3001\u76EE\u5F55\u548C\u7C7B\u578B\u67E5\u770B\u672C\u6B21\u626B\u63CF\u53D1\u73B0\u7684\u95EE\u9898\u4E0E\u5360\u7528\u6982\u89C8\u3002"),
+  buildMenuOption("\u6267\u884C\u6E05\u7406", "cleanup", "\u6839\u636E\u5EFA\u8BAE\u6267\u884C\u5220\u9664\u3001\u56DE\u6536\u7AD9\u79FB\u52A8\u6216\u5176\u4ED6\u6E05\u7406\u64CD\u4F5C\u3002"),
+  buildMenuOption("\u64CD\u4F5C\u5386\u53F2", "history", "\u67E5\u770B\u4F60\u4E4B\u524D\u6267\u884C\u8FC7\u7684\u6E05\u7406\u8BB0\u5F55\u4E0E\u5904\u7406\u7ED3\u679C\u3002"),
+  buildMenuOption("\u504F\u597D\u8BBE\u7F6E", "settings", "\u8C03\u6574 AI\u3001\u9608\u503C\u3001\u6392\u9664\u89C4\u5219\u548C\u754C\u9762\u504F\u597D\u3002"),
 ];
 
 const activeKey = computed(() => (route.name as string) || "scan");

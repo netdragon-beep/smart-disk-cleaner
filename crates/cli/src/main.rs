@@ -55,7 +55,9 @@ async fn main() -> Result<()> {
 
             let report = ScanReport {
                 generated_at: Utc::now(),
+                scan_duration_ms: 0,
                 root: scan.root.clone(),
+                scanned_files: scan.files,
                 modules: build_scan_modules(&analysis, &dedup),
                 analysis,
                 dedup,

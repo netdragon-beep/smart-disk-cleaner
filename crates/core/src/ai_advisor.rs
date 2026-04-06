@@ -1923,6 +1923,7 @@ mod tests {
     fn resolves_relative_file_path_against_scan_root() {
         let report = crate::models::ScanReport {
             generated_at: chrono::Utc::now(),
+            scan_duration_ms: 0,
             root: PathBuf::from(r"E:\ScanRoot"),
             scanned_files: Vec::new(),
             analysis: empty_analysis(),

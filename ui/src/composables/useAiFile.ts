@@ -6,6 +6,13 @@ export function useAiFile() {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
+  async function requestFileInsight(
+    path: string,
+    config?: AppConfig | null
+  ): Promise<FileAiInsight> {
+    return await invoke<FileAiInsight>("explain_file_with_ai", { path, config });
+  }
+
   async function explainFile(
     path: string,
     config?: AppConfig | null
@@ -25,6 +32,7 @@ export function useAiFile() {
   return {
     loading,
     error,
+    requestFileInsight,
     explainFile,
   };
 }
