@@ -1,4 +1,8 @@
 use crate::models::{FileRecord, PathIssue, ScanResult};
+use crate::platform::{
+    is_macos_root, is_windows_drive_root, MACOS_BUILTIN_EXCLUDE_PATTERNS,
+    MACOS_SYSTEM_ROOT_EXCLUDES,
+};
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -14,12 +18,29 @@ const BUILTIN_EXCLUDE_PATTERNS: &[&str] = &[
     "**/.svn/**",
     "**/.hg/**",
     "**/node_modules/**",
+    "**/.npm/**",
+    "**/.pnpm-store/**",
+    "**/.yarn/cache/**",
+    "**/.yarn/unplugged/**",
     "**/target/**",
     "**/.cargo-target/**",
+    "**/.venv/**",
+    "**/venv/**",
     "**/.vscode/extensions/**",
     "**/AppData/Local/Temp/**",
     "**/AppData/Local/**/Cache/**",
     "**/AppData/Local/**/Caches/**",
+    "**/AppData/Local/npm-cache/**",
+    "**/AppData/Local/pnpm/store/**",
+    "**/AppData/Local/Yarn/Cache/**",
+    "**/AppData/Local/Yarn/Berry/cache/**",
+    "**/AppData/Local/JetBrains/**/caches/**",
+    "**/AppData/Roaming/Code/Cache/**",
+    "**/AppData/Roaming/Code/CachedData/**",
+    "**/AppData/Roaming/Code/Service Worker/CacheStorage/**",
+    "**/AppData/Roaming/Python/**/site-packages/**",
+    "**/AppData/Local/Programs/Python/**/Lib/site-packages/**",
+    "**/AppData/Roaming/smart-disk-cleaner/**",
 ];
 
 const WINDOWS_SYSTEM_ROOT_EXCLUDES: &[&str] = &[
@@ -101,7 +122,7 @@ where
         bail!("scan path is not a directory: {}", root.display());
     }
 
-    let exclude_matcher = build_exclude_matcher(root, &options.exclude_patterns)?;
+    let exclude_matcher = build_exclude_matcher(root, options)?;
     let mut files = Vec::new();
     let mut empty_dirs = Vec::new();
     let mut failures = Vec::new();
@@ -158,7 +179,7 @@ where
                 }
 
                 counter += 1;
-                if counter % 100 == 0 {
+                if counter % 25 == 0 {
                     on_progress(&ScanProgress {
                         phase: "walking".to_string(),
                         files_found: files.len(),
@@ -180,7 +201,7 @@ where
         files_found: files.len(),
         dirs_visited,
         bytes_found,
-        current_path: None,
+        current_path: Some(root.to_path_buf()),
     });
 
     Ok(ScanResult {
@@ -191,9 +212,12 @@ where
     })
 }
 
-fn build_exclude_matcher(root: &Path, patterns: &[String]) -> Result<GlobSet> {
+fn build_exclude_matcher(root: &Path, options: &ScanOptions) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in BUILTIN_EXCLUDE_PATTERNS {
+        builder.add(Glob::new(pattern)?);
+    }
+    for pattern in MACOS_BUILTIN_EXCLUDE_PATTERNS {
         builder.add(Glob::new(pattern)?);
     }
     if is_windows_drive_root(root) {
@@ -201,7 +225,13 @@ fn build_exclude_matcher(root: &Path, patterns: &[String]) -> Result<GlobSet> {
             builder.add(Glob::new(pattern)?);
         }
     }
-    for pattern in patterns
+    if is_macos_root(root) {
+        for pattern in MACOS_SYSTEM_ROOT_EXCLUDES {
+            builder.add(Glob::new(pattern)?);
+        }
+    }
+    for pattern in options
+        .exclude_patterns
         .iter()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
@@ -209,11 +239,6 @@ fn build_exclude_matcher(root: &Path, patterns: &[String]) -> Result<GlobSet> {
         builder.add(Glob::new(pattern)?);
     }
     Ok(builder.build()?)
-}
-
-fn is_windows_drive_root(path: &Path) -> bool {
-    let display = path.to_string_lossy().replace('\\', "/");
-    display.len() >= 2 && display.as_bytes()[1] == b':' && display[2..].trim_matches('/').is_empty()
 }
 
 fn is_excluded(path: &Path, root: &Path, matcher: &GlobSet) -> bool {
@@ -293,6 +318,55 @@ mod tests {
             .files
             .iter()
             .all(|file| file.path.ends_with("keep.txt")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skips_builtin_python_package_directories() {
+        let root = test_dir("python-packages");
+        let keep_dir = root.join("workspace");
+        let excluded_dir = root
+            .join("AppData")
+            .join("Roaming")
+            .join("Python")
+            .join("Python311")
+            .join("site-packages")
+            .join("scipy");
+
+        fs::create_dir_all(&keep_dir).expect("keep dir should exist");
+        fs::create_dir_all(&excluded_dir).expect("excluded dir should exist");
+        fs::write(keep_dir.join("keep.txt"), b"keep").expect("keep file should exist");
+        fs::write(excluded_dir.join("fft.py"), b"import numpy").expect("package file should exist");
+
+        let scan = scan_directory_with_options(&root, &ScanOptions::default())
+            .expect("scan should succeed");
+
+        assert_eq!(scan.files.len(), 1);
+        assert!(scan.files[0].path.ends_with("keep.txt"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skips_builtin_package_manager_and_virtualenv_directories() {
+        let root = test_dir("package-cache");
+        let keep_dir = root.join("project").join("src");
+        let npm_cache_dir = root.join(".npm").join("_cacache");
+        let venv_dir = root.join("project").join(".venv").join("Lib");
+
+        fs::create_dir_all(&keep_dir).expect("keep dir should exist");
+        fs::create_dir_all(&npm_cache_dir).expect("npm cache dir should exist");
+        fs::create_dir_all(&venv_dir).expect("venv dir should exist");
+        fs::write(keep_dir.join("main.rs"), b"fn main() {}").expect("source file should exist");
+        fs::write(npm_cache_dir.join("pkg.tgz"), b"cache").expect("cache file should exist");
+        fs::write(venv_dir.join("site.py"), b"venv").expect("venv file should exist");
+
+        let scan = scan_directory_with_options(&root, &ScanOptions::default())
+            .expect("scan should succeed");
+
+        assert_eq!(scan.files.len(), 1);
+        assert!(scan.files[0].path.ends_with("main.rs"));
 
         let _ = fs::remove_dir_all(root);
     }

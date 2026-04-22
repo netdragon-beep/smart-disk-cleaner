@@ -59,12 +59,162 @@ export interface DedupResult {
 export type SuggestedAction = "delete" | "keep" | "move" | "review";
 export type RiskLevel = "low" | "medium" | "high";
 export type AiInsightTargetKind = "file" | "directory";
+export type MigrationCategory =
+  | "large_files"
+  | "download_archives"
+  | "wechat_data"
+  | "conda_package_cache"
+  | "conda_environments"
+  | "conda_installation";
+export type MigrationSupportLevel = "one_click" | "guided" | "manual";
+export type MigrationObjectKind =
+  | "file"
+  | "directory"
+  | "app_data"
+  | "package_cache"
+  | "environment_store"
+  | "installation_root";
+export type MigrationDocSourceKind =
+  | "local_rule"
+  | "official_doc"
+  | "local_observation"
+  | "historical_case";
+export type MigrationActionKind =
+  | "stop_process"
+  | "move_path"
+  | "update_yaml_list"
+  | "set_env_var"
+  | "create_junction"
+  | "verify_path_exists";
+export type MigrationCheckpointKind = "file_content" | "env_var" | "path_state";
+export type MigrationRunStatus = "dry_run" | "succeeded" | "failed" | "rolled_back";
 
 export interface FileSuggestion {
   path: string;
   action: SuggestedAction;
   risk: RiskLevel;
   reason: string;
+}
+
+export interface MigrationActionStep {
+  title: string;
+  detail: string;
+  required: boolean;
+}
+
+export interface MigrationOpportunity {
+  id: string;
+  title: string;
+  category: MigrationCategory;
+  supportLevel: MigrationSupportLevel;
+  risk: RiskLevel;
+  estimatedSize: number;
+  sourcePath: string;
+  recommendedTargetDir: string;
+  recommendedTargetPath: string;
+  reason: string;
+  blockedProcesses: string[];
+  requiredSteps: MigrationActionStep[];
+  oneClickPaths: string[];
+  tags: string[];
+}
+
+export interface MigrationAdvisorOutput {
+  source: string;
+  summary: string;
+  opportunities: MigrationOpportunity[];
+  plans: MigrationPlan[];
+}
+
+export interface MigrationDocSource {
+  title: string;
+  kind: MigrationDocSourceKind;
+  uri: string | null;
+  note: string;
+}
+
+export interface MigrationDocExcerpt {
+  title: string;
+  kind: MigrationDocSourceKind;
+  uri: string | null;
+  excerpt: string;
+}
+
+export interface MigrationAction {
+  id: string;
+  kind: MigrationActionKind;
+  title: string;
+  detail: string;
+  required: boolean;
+  enabledByDefault: boolean;
+  params: Record<string, unknown>;
+}
+
+export interface MigrationCheckpoint {
+  key: string;
+  kind: MigrationCheckpointKind;
+  target: string;
+  snapshot: Record<string, unknown> | string | null;
+}
+
+export interface MigrationRollbackAction {
+  id: string;
+  kind: MigrationActionKind;
+  title: string;
+  detail: string;
+  params: Record<string, unknown>;
+}
+
+export interface MigrationPlan {
+  id: string;
+  title: string;
+  category: MigrationCategory;
+  objectKind: MigrationObjectKind;
+  supportLevel: MigrationSupportLevel;
+  risk: RiskLevel;
+  estimatedSize: number;
+  sourcePath: string;
+  recommendedTargetDir: string;
+  recommendedTargetPath: string;
+  summary: string;
+  rationale: string;
+  tags: string[];
+  docSources: MigrationDocSource[];
+  actions: MigrationAction[];
+  verificationSteps: MigrationActionStep[];
+}
+
+export interface MigrationHistoricalCase {
+  runId: string;
+  title: string;
+  status: MigrationRunStatus;
+  dryRun: boolean;
+  actionTitles: string[];
+  failureReason: string | null;
+}
+
+export interface MigrationExecutionRecord {
+  runId: string;
+  planId: string;
+  title: string;
+  startedAt: string;
+  finishedAt: string;
+  dryRun: boolean;
+  status: MigrationRunStatus;
+  checkpoints: MigrationCheckpoint[];
+  rollbackActions: MigrationRollbackAction[];
+  logs: OperationLogEntry[];
+  failureReason: string | null;
+}
+
+export interface MigrationPlanReview {
+  plan: MigrationPlan;
+  source: string;
+  remoteAttempted: boolean;
+  usedFallback: boolean;
+  fallbackReason: string | null;
+  docExcerpts: MigrationDocExcerpt[];
+  historicalCases: MigrationHistoricalCase[];
 }
 
 export interface AdvisorOutput {
@@ -125,6 +275,31 @@ export interface ProcessAiInsight {
   fallbackReason: string | null;
 }
 
+export interface ProcessAiFollowUpAnswer {
+  pid: number;
+  name: string;
+  question: string;
+  answer: string;
+  source: string;
+  remoteAttempted: boolean;
+  usedFallback: boolean;
+  fallbackReason: string | null;
+}
+
+export interface ProcessAiFollowUpTurn {
+  question: string;
+  answer: string;
+}
+
+export interface ProcessMonitorSnapshot {
+  collectedAt: string;
+  systemCpuUsage: number;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  diskBytesPerSec: number;
+  topProcesses: ProcessRecord[];
+}
+
 export interface ScanReport {
   generatedAt: string;
   scanDurationMs: number;
@@ -135,6 +310,10 @@ export interface ScanReport {
   modules: ScanModuleSummary[];
   advisor: AdvisorOutput;
   failures: PathIssue[];
+  dedupPending?: boolean;
+  dedupPhase?: string | null;
+  dedupMessage?: string | null;
+  dedupError?: string | null;
 }
 
 export interface FileTreeRow {
@@ -156,6 +335,21 @@ export interface DirectoryOverviewRow {
   fileCount: number;
   totalSize: number;
   preview: string;
+}
+
+export interface AppOverviewRow {
+  key: string;
+  appName: string;
+  vendor: string;
+  category: string;
+  sourceSummary: string;
+  statusTags: string[];
+  iconDataUri: string;
+  iconSource: string;
+  detectedRoot: string;
+  fileCount: number;
+  totalSize: number;
+  samplePaths: string[];
 }
 
 export interface FileTreeQueryResult {
@@ -202,6 +396,14 @@ export interface OperationLogEntry {
   success: boolean;
   detail: string;
   diagnosis: PathDiagnosis | null;
+}
+
+export interface BlockingProcessInfo {
+  pid: number;
+  appName: string;
+  serviceName: string | null;
+  restartable: boolean;
+  processStartTime: number;
 }
 
 export interface AppConfig {

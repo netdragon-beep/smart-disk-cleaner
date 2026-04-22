@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { computed, h, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -31,8 +31,11 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { useAppStore } from "@/stores/app";
 import { useAiFile } from "@/composables/useAiFile";
+import { useScan } from "@/composables/useScan";
+import AppOverviewSection from "@/components/AppOverviewSection.vue";
 import type {
-  DirectoryOverviewRow,
+  DuplicateGroup,
+  AppOverviewRow,
   FileAiInsight,
   FileRecord,
   FileSuggestion,
@@ -138,13 +141,21 @@ const TEXT = {
   loadingDirectoryOverview: "正在加载目录概览...",
   loadingFileTree: "正在按当前筛选条件加载文件树...",
   directoryOverviewFailed: "目录概览加载失败",
+  directoryTreeEmpty: "当前没有可展示的目录空间结果。",
+  directoryTreeHint: "按目录占用空间降序展示，可继续展开查看子目录和更深层级。",
   fileTreeFailed: "文件清单加载失败",
   fileTreeEmpty: "当前筛选条件下没有匹配文件。",
   fileTreeTruncated: "匹配结果过多，当前仅展示前 3000 个匹配文件以避免页面卡死。",
   fileTreeCollapsed: "结果较多，目录默认折叠显示，避免界面卡顿。",
+  fileTreeDefaultMode: "当前默认先展示顶层目录/文件概览。输入关键词、选择类型或点击应用卡片后，会切换到更细的详细树。",
+  explorerTitle: "资源浏览器",
+  explorerHint: "在同一张卡片里查看目录、子目录和子文件。默认目录全部收起，展开后按空间占用大小排序。",
   suggestionsLimited: "建议列表已做截断，仅展示前 1000 条建议。",
   duplicateGroupsLimited: "重复文件组已做截断，仅展示前 10 组。",
   sectionLimited: "当前结果页仅展示前 50 项，避免大盘扫描导致页面占用过高。",
+  dedupPendingTitle: "重复文件识别仍在后台继续",
+  dedupPendingDefault: "基础结果已经可以查看，重复文件识别完成后会自动刷新到当前页面。",
+  dedupFailedTitle: "重复文件后台识别失败",
 };
 
 use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
@@ -152,6 +163,7 @@ use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer
 const router = useRouter();
 const store = useAppStore();
 const { requestFileInsight } = useAiFile();
+const { getLatestScanReport } = useScan();
 const message = useMessage();
 const report = computed(() => store.report);
 const reportKey = computed(() =>
@@ -160,23 +172,26 @@ const reportKey = computed(() =>
 
 const fileQuery = ref("");
 const selectedCategory = ref<FileCategory>("all");
+const selectedApp = ref<AppOverviewRow | null>(null);
 const aiInsightVisible = ref(false);
 const selectedAiPath = ref("");
 const fileAiInsightCache = ref<Record<string, FileAiInsight>>({});
 const fileAiInsightPending = ref<Record<string, boolean>>({});
 const fileAiInsightErrors = ref<Record<string, string>>({});
 
-const directoryOverviewRows = ref<DirectoryOverviewRow[]>([]);
-const directoryOverviewLoading = ref(false);
-const directoryOverviewError = ref<string | null>(null);
-
 const fileTreeResult = ref<FileTreeQueryResult>(emptyFileTreeResult());
 const fileTreeLoading = ref(false);
 const fileTreeError = ref<string | null>(null);
+const directoryTreeResult = ref<FileTreeQueryResult>(emptyFileTreeResult());
+const directoryTreeLoading = ref(false);
+const directoryTreeError = ref<string | null>(null);
 
 let fileTreeTimer: ReturnType<typeof setTimeout> | null = null;
+let backgroundRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let directoryTreeTimer: ReturnType<typeof setTimeout> | null = null;
 let fileTreeRequestId = 0;
-let directoryOverviewRequestId = 0;
+let directoryTreeRequestId = 0;
+const hasShownDedupReadyToast = ref(false);
 
 const selectedAiInsight = computed(() =>
   selectedAiPath.value ? fileAiInsightCache.value[selectedAiPath.value] ?? null : null
@@ -196,12 +211,8 @@ const suggestionByPath = computed(() => {
   return map;
 });
 
-const advisorSourceLabel = computed(() => formatSourceLabel(report.value?.advisor.source));
 const duplicateGroupCount = computed(
   () => report.value?.dedup.groupCount ?? report.value?.dedup.groups.length ?? 0
-);
-const suggestionCount = computed(
-  () => report.value?.advisor.suggestionCount ?? report.value?.advisor.suggestions.length ?? 0
 );
 const scanDurationLabel = computed(() => formatDurationMs(report.value?.scanDurationMs ?? 0));
 
@@ -250,11 +261,82 @@ const fileCategoryOptions = [
 ];
 
 const fileTreeRows = computed(() => fileTreeResult.value.rows);
+const directoryTreeRows = computed(() => directoryTreeResult.value.rows);
+const explorerRows = computed(() =>
+  isDefaultFileTreeMode.value ? directoryTreeRows.value : fileTreeRows.value
+);
+const explorerLoading = computed(() =>
+  isDefaultFileTreeMode.value ? directoryTreeLoading.value : fileTreeLoading.value
+);
+const explorerError = computed(() =>
+  isDefaultFileTreeMode.value ? directoryTreeError.value : fileTreeError.value
+);
+const explorerMatchedCount = computed(() =>
+  isDefaultFileTreeMode.value ? directoryTreeResult.value.matchedCount : fileTreeResult.value.matchedCount
+);
+const explorerNodeCount = computed(() =>
+  isDefaultFileTreeMode.value ? directoryTreeResult.value.nodeCount : fileTreeResult.value.nodeCount
+);
 const scannedFilesHint = computed(() => {
   if (!report.value) return "";
-  return `${TEXT.scannedFilesHintPrefix}${fileTreeResult.value.matchedCount}${TEXT.scannedFilesHintMiddle}${fileTreeResult.value.nodeCount}${TEXT.scannedFilesHintSuffix}`;
+  return `${TEXT.scannedFilesHintPrefix}${explorerMatchedCount.value}${TEXT.scannedFilesHintMiddle}${explorerNodeCount.value}${TEXT.scannedFilesHintSuffix}`;
 });
 const shouldExpandFileTree = computed(() => fileTreeResult.value.nodeCount <= 200);
+const isDefaultFileTreeMode = computed(
+  () => !fileQuery.value.trim() && selectedCategory.value === "all" && !selectedApp.value
+);
+const explorerEmptyText = computed(() =>
+  isDefaultFileTreeMode.value ? TEXT.directoryTreeEmpty : TEXT.fileTreeEmpty
+);
+const normalizedSelectedAppRoot = computed(() =>
+  selectedApp.value ? normalizePath(selectedApp.value.detectedRoot) : ""
+);
+
+const filteredLargeFiles = computed(() =>
+  filterFilesBySelectedApp(report.value?.analysis.largeFiles ?? [])
+);
+const filteredTemporaryFiles = computed(() =>
+  filterFilesBySelectedApp(report.value?.analysis.temporaryFiles ?? [])
+);
+const filteredArchiveFiles = computed(() =>
+  filterFilesBySelectedApp(report.value?.analysis.archiveFiles ?? [])
+);
+const filteredDedupGroups = computed(() =>
+  filterDuplicateGroupsBySelectedApp(report.value?.dedup.groups ?? [])
+);
+
+const directoryTreeColumns: DataTableColumns<FileTreeRow> = [
+  {
+    title: TEXT.itemName,
+    key: "name",
+    ellipsis: { tooltip: true },
+    render: (row) =>
+      h("div", { style: "display: flex; flex-direction: column; gap: 2px;" }, [
+        h(
+          "div",
+          { style: "display: flex; align-items: center; gap: 8px;" },
+          [
+            h(NTag, { size: "small", type: "info" }, () => TEXT.directory),
+            h("span", row.name),
+          ]
+        ),
+        h(NText, { depth: 3, style: "font-size: 12px;" }, () => row.path),
+      ]),
+  },
+  {
+    title: TEXT.size,
+    key: "size",
+    width: 120,
+    sorter: (left, right) => left.size - right.size,
+    render: (row) => formatBytes(row.size),
+  },
+  {
+    title: TEXT.fileCount,
+    key: "fileCount",
+    width: 110,
+    sorter: (left, right) => left.fileCount - right.fileCount,
+  },
+];
 
 const fileTreeColumns: DataTableColumns<FileTreeRow> = [
   {
@@ -360,72 +442,18 @@ const fileColumns: DataTableColumns<FileRecord> = [
   },
 ];
 
-const directoryColumns: DataTableColumns<DirectoryOverviewRow> = [
-  {
-    title: TEXT.itemName,
-    key: "name",
-    ellipsis: { tooltip: true },
-  },
-  {
-    title: TEXT.itemType,
-    key: "kind",
-    width: 90,
-    render: (row) =>
-      h(
-        NTag,
-        {
-          size: "small",
-          type: row.kind === "directory" ? "info" : "default",
-        },
-        () => (row.kind === "directory" ? TEXT.directory : TEXT.file)
-      ),
-  },
-  {
-    title: TEXT.fileCount,
-    key: "fileCount",
-    width: 90,
-  },
-  {
-    title: TEXT.size,
-    key: "totalSize",
-    width: 120,
-    render: (row) => formatBytes(row.totalSize),
-  },
-  {
-    title: TEXT.contentPreview,
-    key: "preview",
-    ellipsis: { tooltip: true },
-  },
-  {
-    title: TEXT.aiInspect,
-    key: "aiInspect",
-    width: 110,
-    render: (row) =>
-      h(
-        NButton,
-        {
-          size: "tiny",
-          secondary: true,
-          type: "primary",
-          loading: Boolean(fileAiInsightPending.value[row.path]),
-          onClick: () => void handleFileAiAction(row.path),
-        },
-        () => fileAiButtonText(row.path)
-      ),
-  },
-];
-
 watch(
   reportKey,
   async (key) => {
     if (!key) {
-      resetDirectoryOverviewState();
       resetFileTreeState();
+      resetDirectoryTreeState();
+      stopBackgroundRefresh();
+      hasShownDedupReadyToast.value = false;
       return;
     }
-
-    await loadDirectoryOverview();
-    scheduleFileTreeLoad(0);
+    scheduleExplorerLoad(0);
+    ensureBackgroundRefresh();
   },
   { immediate: true }
 );
@@ -434,15 +462,43 @@ watch([fileQuery, selectedCategory], () => {
   if (!reportKey.value) {
     return;
   }
-  scheduleFileTreeLoad(250);
+  scheduleExplorerLoad(250);
 });
+
+watch(
+  () => selectedApp.value?.key,
+  () => {
+    if (!reportKey.value) {
+      return;
+    }
+    scheduleExplorerLoad(0);
+  }
+);
 
 onBeforeUnmount(() => {
   if (fileTreeTimer) {
     clearTimeout(fileTreeTimer);
     fileTreeTimer = null;
   }
+  if (directoryTreeTimer) {
+    clearTimeout(directoryTreeTimer);
+    directoryTreeTimer = null;
+  }
+  stopBackgroundRefresh();
 });
+
+watch(
+  () => report.value?.dedupPending,
+  (pending) => {
+    if (pending) {
+      hasShownDedupReadyToast.value = false;
+      ensureBackgroundRefresh();
+    } else {
+      stopBackgroundRefresh();
+    }
+  },
+  { immediate: true }
+);
 
 function emptyFileTreeResult(): FileTreeQueryResult {
   return {
@@ -453,16 +509,67 @@ function emptyFileTreeResult(): FileTreeQueryResult {
   };
 }
 
-function resetDirectoryOverviewState() {
-  directoryOverviewRows.value = [];
-  directoryOverviewLoading.value = false;
-  directoryOverviewError.value = null;
-}
-
 function resetFileTreeState() {
   fileTreeResult.value = emptyFileTreeResult();
   fileTreeLoading.value = false;
   fileTreeError.value = null;
+}
+
+function resetDirectoryTreeState() {
+  directoryTreeResult.value = emptyFileTreeResult();
+  directoryTreeLoading.value = false;
+  directoryTreeError.value = null;
+}
+
+function stopBackgroundRefresh() {
+  if (backgroundRefreshTimer) {
+    clearInterval(backgroundRefreshTimer);
+    backgroundRefreshTimer = null;
+  }
+}
+
+function ensureBackgroundRefresh() {
+  stopBackgroundRefresh();
+  if (!report.value?.dedupPending) {
+    return;
+  }
+  backgroundRefreshTimer = setInterval(() => {
+    void refreshLatestReport();
+  }, 1500);
+}
+
+async function refreshLatestReport() {
+  const wasPending = Boolean(report.value?.dedupPending);
+  const latest = await getLatestScanReport();
+  if (!latest) {
+    return;
+  }
+  store.setReport(latest);
+  if (!latest.dedupPending) {
+    stopBackgroundRefresh();
+    if (wasPending && !latest.dedupError && !hasShownDedupReadyToast.value) {
+      hasShownDedupReadyToast.value = true;
+      message.success("重复文件结果已补充完成。");
+    }
+  }
+}
+
+function scheduleExplorerLoad(delayMs: number) {
+  if (isDefaultFileTreeMode.value) {
+    scheduleDirectoryTreeLoad(delayMs);
+    return;
+  }
+  scheduleFileTreeLoad(delayMs);
+}
+
+function scheduleDirectoryTreeLoad(delayMs: number) {
+  if (directoryTreeTimer) {
+    clearTimeout(directoryTreeTimer);
+  }
+  directoryTreeTimer = setTimeout(() => {
+    directoryTreeTimer = null;
+    void loadDirectoryTree();
+  }, delayMs);
 }
 
 function scheduleFileTreeLoad(delayMs: number) {
@@ -475,39 +582,16 @@ function scheduleFileTreeLoad(delayMs: number) {
   }, delayMs);
 }
 
-async function loadDirectoryOverview() {
-  const requestId = ++directoryOverviewRequestId;
-  directoryOverviewLoading.value = true;
-  directoryOverviewError.value = null;
-
-  try {
-    const result = await invoke<DirectoryOverviewRow[]>("get_directory_overview");
-    if (requestId !== directoryOverviewRequestId) {
-      return;
-    }
-    directoryOverviewRows.value = result;
-  } catch (error) {
-    if (requestId !== directoryOverviewRequestId) {
-      return;
-    }
-    directoryOverviewRows.value = [];
-    directoryOverviewError.value =
-      typeof error === "string" ? error : (error as Error).message || String(error);
-  } finally {
-    if (requestId === directoryOverviewRequestId) {
-      directoryOverviewLoading.value = false;
-    }
-  }
-}
-
 async function loadFileTree() {
   const requestId = ++fileTreeRequestId;
   fileTreeLoading.value = true;
   fileTreeError.value = null;
 
   try {
-    const result = await invoke<FileTreeQueryResult>("query_file_tree", {
-      query: fileQuery.value.trim() || null,
+    const appQuery = selectedApp.value?.detectedRoot?.trim() || "";
+    const keywordQuery = fileQuery.value.trim();
+    const result = await invoke<FileTreeQueryResult>("query_file_tree_v2", {
+      query: appQuery || keywordQuery || null,
       category: selectedCategory.value,
     });
     if (requestId !== fileTreeRequestId) {
@@ -573,6 +657,66 @@ function moduleDescription(kind: ScanModuleKind): string {
 
 function goToCleanup() {
   router.push({ name: "cleanup" });
+}
+
+async function loadDirectoryTree() {
+  const requestId = ++directoryTreeRequestId;
+  directoryTreeLoading.value = true;
+  directoryTreeError.value = null;
+
+  try {
+    const appQuery = selectedApp.value?.detectedRoot?.trim() || "";
+    const result = await invoke<FileTreeQueryResult>("query_directory_tree_v2", {
+      query: appQuery || null,
+    });
+    if (requestId !== directoryTreeRequestId) {
+      return;
+    }
+    directoryTreeResult.value = result;
+  } catch (error) {
+    if (requestId !== directoryTreeRequestId) {
+      return;
+    }
+    directoryTreeResult.value = emptyFileTreeResult();
+    directoryTreeError.value =
+      typeof error === "string" ? error : (error as Error).message || String(error);
+  } finally {
+    if (requestId === directoryTreeRequestId) {
+      directoryTreeLoading.value = false;
+    }
+  }
+}
+
+function handleSelectApp(app: AppOverviewRow) {
+  selectedApp.value = app;
+}
+
+function handleClearSelectedApp() {
+  selectedApp.value = null;
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+function matchesSelectedAppPath(path: string): boolean {
+  if (!normalizedSelectedAppRoot.value) {
+    return true;
+  }
+  return normalizePath(path).startsWith(normalizedSelectedAppRoot.value);
+}
+
+function filterFilesBySelectedApp(files: FileRecord[]): FileRecord[] {
+  return files.filter((file) => matchesSelectedAppPath(file.path));
+}
+
+function filterDuplicateGroupsBySelectedApp(groups: DuplicateGroup[]): DuplicateGroup[] {
+  if (!normalizedSelectedAppRoot.value) {
+    return groups;
+  }
+  return groups.filter((group) =>
+    group.files.some((file) => matchesSelectedAppPath(file.path))
+  );
 }
 
 function fileAiButtonText(path: string): string {
@@ -740,208 +884,295 @@ function duplicateTagLabel(path: string): string {
     </n-empty>
   </div>
 
-  <div v-else>
-    <n-space vertical :size="20">
-      <n-card :title="TEXT.overview">
-        <n-space vertical :size="16">
-          <n-text depth="3">{{ TEXT.rootPath }}：{{ report.root }}</n-text>
-          <n-grid :cols="5" :x-gap="12">
-            <n-gi>
-              <n-statistic :label="TEXT.totalFiles" :value="report.analysis.totalFiles" />
-            </n-gi>
-            <n-gi>
-              <n-statistic :label="TEXT.totalSize" :value="formatBytes(report.analysis.totalSize)" />
-            </n-gi>
-            <n-gi>
-              <n-statistic :label="TEXT.duplicateGroups" :value="duplicateGroupCount" />
-            </n-gi>
-            <n-gi>
-              <n-statistic :label="TEXT.suggestionCount" :value="suggestionCount" />
-            </n-gi>
-            <n-gi>
-              <n-statistic label="扫描耗时" :value="scanDurationLabel" />
-            </n-gi>
-          </n-grid>
-        </n-space>
-      </n-card>
+  <div v-else class="page-shell results-page">
+    <section class="page-hero">
+      <n-space vertical :size="18">
+        <div>
+          <div class="results-hero-kicker">Analysis Workbench</div>
+          <div class="page-hero__title">扫描结果工作台</div>
+          <div class="page-hero__desc">
+            从应用、目录、文件和 AI 建议四个层级回看这次扫描结果。页面会把高价值信息放在前面，并支持继续联动到清理动作。
+          </div>
+        </div>
+        <div class="soft-panel results-root-panel">
+          <n-text depth="3">{{ TEXT.rootPath }}</n-text>
+          <div class="results-root-value">{{ report.root }}</div>
+        </div>
+      </n-space>
+    </section>
 
-      <n-card :title="TEXT.directoryOverview">
-        <n-space vertical :size="12">
-          <n-alert v-if="directoryOverviewError" type="error" :title="TEXT.directoryOverviewFailed">
-            {{ directoryOverviewError }}
-          </n-alert>
-          <n-text v-else-if="directoryOverviewLoading" depth="3">
-            {{ TEXT.loadingDirectoryOverview }}
+    <section class="metric-grid">
+      <div class="metric-card">
+        <div class="metric-card__label">{{ TEXT.totalFiles }}</div>
+        <div class="metric-card__value">{{ report.analysis.totalFiles }}</div>
+        <div class="metric-card__hint">本次纳入分析的文件数量</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">{{ TEXT.totalSize }}</div>
+        <div class="metric-card__value">{{ formatBytes(report.analysis.totalSize) }}</div>
+        <div class="metric-card__hint">总扫描体积</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">{{ TEXT.duplicateGroups }}</div>
+        <div class="metric-card__value">{{ duplicateGroupCount }}</div>
+        <div class="metric-card__hint">可进一步合并的重复内容</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">扫描耗时</div>
+        <div class="metric-card__value">{{ scanDurationLabel }}</div>
+        <div class="metric-card__hint">用于衡量大盘扫描开销</div>
+      </div>
+    </section>
+
+    <n-alert
+      v-if="report.dedupPending"
+      type="info"
+      class="results-app-alert"
+      :title="TEXT.dedupPendingTitle"
+    >
+      {{ report.dedupMessage || TEXT.dedupPendingDefault }}
+    </n-alert>
+
+    <n-alert
+      v-if="report.dedupError"
+      type="error"
+      class="results-app-alert"
+      :title="TEXT.dedupFailedTitle"
+    >
+      {{ report.dedupError }}
+    </n-alert>
+
+    <n-card class="surface-card interactive-card">
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">{{ TEXT.explorerTitle }}</div>
+            <div class="section-head__desc">{{ TEXT.explorerHint }}</div>
+          </div>
+        </div>
+      </template>
+
+      <n-space vertical :size="14">
+        <div class="filter-bar results-filter-bar">
+          <n-input
+            v-model:value="fileQuery"
+            clearable
+            :placeholder="TEXT.fileSearchPlaceholder"
+            class="results-filter-bar__search"
+          />
+          <n-select
+            v-model:value="selectedCategory"
+            :options="fileCategoryOptions"
+            :placeholder="TEXT.fileCategoryPlaceholder"
+            class="results-filter-bar__select"
+          />
+        </div>
+
+        <n-alert v-if="selectedApp" type="info" class="results-app-alert">
+          当前已按应用筛选：{{ selectedApp.appName }}（{{ selectedApp.detectedRoot }}）
+        </n-alert>
+
+        <n-alert
+          v-if="explorerError"
+          type="error"
+          :title="isDefaultFileTreeMode ? TEXT.directoryOverviewFailed : TEXT.fileTreeFailed"
+        >
+          {{ explorerError }}
+        </n-alert>
+        <div v-else-if="explorerLoading" class="soft-panel">
+          <n-text depth="3">
+            {{ isDefaultFileTreeMode ? TEXT.loadingDirectoryOverview : TEXT.loadingFileTree }}
           </n-text>
-          <n-data-table
-            v-if="directoryOverviewRows.length > 0"
-            :columns="directoryColumns"
-            :data="directoryOverviewRows"
-            :loading="directoryOverviewLoading"
-            :max-height="320"
-            size="small"
-            :bordered="false"
-          />
-          <n-empty
-            v-else-if="!directoryOverviewLoading && !directoryOverviewError"
-            :description="TEXT.emptyOverview"
-          />
-        </n-space>
-      </n-card>
+        </div>
 
-      <n-card :title="TEXT.scannedFiles">
-        <n-space vertical :size="12">
-          <n-grid :cols="2" :x-gap="12">
-            <n-gi>
-              <n-input
-                v-model:value="fileQuery"
-                clearable
-                :placeholder="TEXT.fileSearchPlaceholder"
-              />
-            </n-gi>
-            <n-gi>
-              <n-select
-                v-model:value="selectedCategory"
-                :options="fileCategoryOptions"
-                :placeholder="TEXT.fileCategoryPlaceholder"
-              />
-            </n-gi>
-          </n-grid>
+        <n-text v-if="!explorerError" depth="3">{{ scannedFilesHint }}</n-text>
+        <n-alert v-if="isDefaultFileTreeMode && explorerRows.length > 0" type="info">
+          {{ TEXT.directoryTreeHint }}
+        </n-alert>
+        <n-alert v-if="fileTreeResult.truncated" type="warning">
+          {{ TEXT.fileTreeTruncated }}
+        </n-alert>
+        <n-alert v-if="!shouldExpandFileTree && explorerRows.length > 0" type="info">
+          {{ TEXT.fileTreeCollapsed }}
+        </n-alert>
 
-          <n-alert v-if="fileTreeError" type="error" :title="TEXT.fileTreeFailed">
-            {{ fileTreeError }}
-          </n-alert>
-          <n-text v-else-if="fileTreeLoading" depth="3">{{ TEXT.loadingFileTree }}</n-text>
-          <n-text v-if="!fileTreeError" depth="3">{{ scannedFilesHint }}</n-text>
-          <n-alert v-if="fileTreeResult.truncated" type="warning">
-            {{ TEXT.fileTreeTruncated }}
-          </n-alert>
-          <n-alert
-            v-if="!shouldExpandFileTree && fileTreeResult.rows.length > 0"
-            type="info"
-          >
-            {{ TEXT.fileTreeCollapsed }}
-          </n-alert>
+        <n-data-table
+          v-if="explorerRows.length > 0"
+          :columns="fileTreeColumns"
+          :data="explorerRows"
+          :loading="explorerLoading"
+          :max-height="520"
+          size="small"
+          :bordered="false"
+          :default-expand-all="false"
+        />
+        <n-empty
+          v-else-if="!explorerLoading && !explorerError"
+          :description="explorerEmptyText"
+        />
+      </n-space>
+    </n-card>
 
-          <n-data-table
-            v-if="fileTreeRows.length > 0"
-            :columns="fileTreeColumns"
-            :data="fileTreeRows"
-            :loading="fileTreeLoading"
-            :max-height="480"
-            size="small"
-            :bordered="false"
-            :default-expand-all="shouldExpandFileTree"
-          />
-          <n-empty
-            v-else-if="!fileTreeLoading && !fileTreeError"
-            :description="TEXT.fileTreeEmpty"
-          />
-        </n-space>
-      </n-card>
+    <AppOverviewSection
+      :report-key="reportKey"
+      :selected-app-key="selectedApp?.key ?? null"
+      @select-app="handleSelectApp"
+      @clear-app="handleClearSelectedApp"
+    />
 
-      <n-card :title="TEXT.scanModules">
-        <n-grid :cols="3" :x-gap="12" :y-gap="12">
+    <div class="results-dual-grid">
+      <n-card class="surface-card interactive-card">
+        <template #header>
+          <div class="section-head">
+            <div>
+              <div class="section-head__title">{{ TEXT.scanModules }}</div>
+              <div class="section-head__desc">把识别到的问题按模块拆开，便于用户判断优先级。</div>
+            </div>
+          </div>
+        </template>
+
+        <n-grid cols="1 s:2" responsive="screen" :x-gap="12" :y-gap="12">
           <n-gi v-for="item in moduleCards" :key="item.kind">
-            <n-card size="small">
+            <div class="results-module-card">
               <n-statistic :label="item.label" :value="item.itemCount" />
-              <n-text depth="3" style="display: block; margin-top: 8px">
+              <n-text depth="3" class="results-module-card__desc">
                 {{ item.description }}
               </n-text>
-              <n-tag size="small" style="margin-top: 8px">
-                {{ formatBytes(item.totalSize) }}
-              </n-tag>
-            </n-card>
+              <n-tag size="small" round>{{ formatBytes(item.totalSize) }}</n-tag>
+            </div>
           </n-gi>
         </n-grid>
       </n-card>
 
-      <n-card :title="TEXT.typeDistribution">
-        <v-chart :option="typeChartOption" style="height: 300px" autoresize />
+      <n-card class="surface-card interactive-card">
+        <template #header>
+          <div class="section-head">
+            <div>
+              <div class="section-head__title">{{ TEXT.typeDistribution }}</div>
+              <div class="section-head__desc">快速识别这次扫描里最占空间的文件类型。</div>
+            </div>
+          </div>
+        </template>
+        <v-chart :option="typeChartOption" style="height: 320px" autoresize />
       </n-card>
+    </div>
 
-      <n-card v-if="report.analysis.largeFiles.length > 0" :title="TEXT.largeFiles">
-        <n-space vertical :size="12">
-          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
-          <n-data-table
-            :columns="fileColumns"
-            :data="report.analysis.largeFiles"
-            :max-height="280"
-            size="small"
-            :bordered="false"
-          />
-        </n-space>
-      </n-card>
+    <n-card v-if="filteredLargeFiles.length > 0" class="surface-card interactive-card">
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">{{ TEXT.largeFiles }}</div>
+            <div class="section-head__desc">先处理体积大的内容，通常最容易带来明显的空间回收。</div>
+          </div>
+        </div>
+      </template>
+      <n-space vertical :size="12">
+        <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+        <n-data-table
+          :columns="fileColumns"
+          :data="filteredLargeFiles"
+          :max-height="320"
+          size="small"
+          :bordered="false"
+        />
+      </n-space>
+    </n-card>
 
-      <n-card v-if="report.analysis.temporaryFiles.length > 0" :title="TEXT.temporaryFiles">
-        <n-space vertical :size="12">
-          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
-          <n-data-table
-            :columns="fileColumns"
-            :data="report.analysis.temporaryFiles"
-            :max-height="280"
-            size="small"
-            :bordered="false"
-          />
-        </n-space>
-      </n-card>
+    <n-card v-if="filteredTemporaryFiles.length > 0" class="surface-card interactive-card">
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">{{ TEXT.temporaryFiles }}</div>
+            <div class="section-head__desc">临时内容通常风险较低，但仍建议用户先复核后执行。</div>
+          </div>
+        </div>
+      </template>
+      <n-space vertical :size="12">
+        <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+        <n-data-table
+          :columns="fileColumns"
+          :data="filteredTemporaryFiles"
+          :max-height="320"
+          size="small"
+          :bordered="false"
+        />
+      </n-space>
+    </n-card>
 
-      <n-card v-if="report.analysis.archiveFiles.length > 0" :title="TEXT.archiveFiles">
-        <n-space vertical :size="12">
-          <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
-          <n-data-table
-            :columns="fileColumns"
-            :data="report.analysis.archiveFiles"
-            :max-height="280"
-            size="small"
-            :bordered="false"
-          />
-        </n-space>
-      </n-card>
+    <n-card v-if="filteredArchiveFiles.length > 0" class="surface-card interactive-card">
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">{{ TEXT.archiveFiles }}</div>
+            <div class="section-head__desc">适合归档、搬迁或确认后删除的压缩包与安装包。</div>
+          </div>
+        </div>
+      </template>
+      <n-space vertical :size="12">
+        <n-alert type="info">{{ TEXT.sectionLimited }}</n-alert>
+        <n-data-table
+          :columns="fileColumns"
+          :data="filteredArchiveFiles"
+          :max-height="320"
+          size="small"
+          :bordered="false"
+        />
+      </n-space>
+    </n-card>
 
-      <n-card v-if="report.dedup.groups.length > 0" :title="TEXT.duplicateGroups">
-        <n-space vertical :size="12">
-          <n-alert v-if="report.dedup.truncated" type="info">
-            {{ TEXT.duplicateGroupsLimited }}
-          </n-alert>
+    <n-card
+      v-if="filteredDedupGroups.length > 0 || report.dedupPending || report.dedupError"
+      class="surface-card interactive-card"
+    >
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">{{ TEXT.duplicateGroups }}</div>
+            <div class="section-head__desc">重复组按建议标签展示，方便手动决定保留哪一份。</div>
+          </div>
+        </div>
+      </template>
+      <n-space vertical :size="12">
+        <n-alert v-if="report.dedupPending" type="info">
+          {{ report.dedupMessage || TEXT.dedupPendingDefault }}
+        </n-alert>
+        <n-alert v-if="report.dedupError" type="error">
+          {{ report.dedupError }}
+        </n-alert>
+        <n-alert v-if="report.dedup.truncated" type="info">
+          {{ TEXT.duplicateGroupsLimited }}
+        </n-alert>
+        <div v-if="filteredDedupGroups.length > 0" class="results-duplicate-grid">
           <n-card
-            v-for="(group, idx) in report.dedup.groups"
+            v-for="(group, idx) in filteredDedupGroups"
             :key="group.hash"
-            :title="`${TEXT.groupPrefix} ${idx + 1} ${TEXT.groupSuffix} (${formatBytes(group.totalSize)})`"
             size="small"
+            embedded
+            class="results-duplicate-card"
+            :title="`${TEXT.groupPrefix} ${idx + 1} ${TEXT.groupSuffix} (${formatBytes(group.totalSize)})`"
           >
-            <n-space vertical :size="4">
-              <div v-for="file in group.files" :key="file.path">
-                <n-tag :type="duplicateTagType(file.path)" size="small">
+            <n-space vertical :size="8">
+              <div v-for="file in group.files" :key="file.path" class="results-duplicate-file">
+                <n-tag :type="duplicateTagType(file.path)" size="small" round>
                   {{ duplicateTagLabel(file.path) }}
                 </n-tag>
-                <n-text style="margin-left: 8px; font-size: 13px">
+                <n-text class="results-duplicate-file__path">
                   {{ file.path }}
                 </n-text>
               </div>
             </n-space>
           </n-card>
-        </n-space>
-      </n-card>
+        </div>
+        <n-empty
+          v-else-if="!report.dedupPending"
+          description="当前还没有可展示的重复文件结果。"
+        />
+      </n-space>
+    </n-card>
 
-      <n-card :title="TEXT.aiSummary">
-        <n-space vertical :size="12">
-          <n-tag :type="report.advisor.source.startsWith('remote') ? 'info' : 'default'" size="small">
-            {{ advisorSourceLabel }}
-          </n-tag>
-          <n-alert v-if="report.advisor.truncated" type="info">
-            {{ TEXT.suggestionsLimited }}
-          </n-alert>
-          <n-text style="display: block; white-space: pre-wrap">
-            {{ report.advisor.summary }}
-          </n-text>
-        </n-space>
-      </n-card>
-
-      <n-button type="primary" @click="goToCleanup" style="width: 100%">
-        {{ TEXT.goCleanup }}
-      </n-button>
-    </n-space>
+    <n-button type="primary" @click="goToCleanup" class="results-primary-action">
+      {{ TEXT.goCleanup }}
+    </n-button>
 
     <n-modal v-model:show="aiInsightVisible" style="width: min(720px, calc(100vw - 32px))">
       <n-card :title="TEXT.aiInspectTitle" :bordered="false" size="small" role="dialog" aria-modal="true">
@@ -1040,3 +1271,121 @@ function duplicateTagLabel(path: string): string {
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+.results-page {
+  gap: 18px;
+}
+
+.results-hero-kicker {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.results-root-panel {
+  line-height: 1.7;
+}
+
+.results-root-value {
+  margin-top: 6px;
+  word-break: break-all;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.results-app-alert {
+  box-shadow: var(--shadow-soft);
+}
+
+.results-filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-items: center;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.results-filter-bar__search {
+  flex: 1 1 360px;
+}
+
+.results-filter-bar__select {
+  width: 240px;
+}
+
+.results-dual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.results-module-card {
+  position: relative;
+  height: 100%;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-soft);
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  overflow: hidden;
+}
+
+.results-module-card::after {
+  content: "";
+  position: absolute;
+  right: -26px;
+  top: -20px;
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0));
+}
+
+.results-module-card__desc {
+  display: block;
+  margin: 10px 0 12px;
+  line-height: 1.7;
+}
+
+.results-duplicate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.results-duplicate-card {
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgba(230, 235, 243, 0.75);
+}
+
+.results-duplicate-file {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.results-duplicate-file__path {
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.results-primary-action {
+  width: 100%;
+  height: 52px;
+  border-radius: 18px;
+}
+
+@media (max-width: 1024px) {
+  .results-dual-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .results-filter-bar__select {
+    width: 100%;
+  }
+}
+</style>
+

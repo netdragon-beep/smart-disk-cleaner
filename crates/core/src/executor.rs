@@ -88,6 +88,61 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
     Ok(logs)
 }
 
+pub fn execute_direct_move(
+    paths: &[PathBuf],
+    target_dir: &Path,
+    dry_run: bool,
+) -> Result<Vec<OperationLogEntry>> {
+    execute_direct_move_with_options(paths, target_dir, dry_run, false)
+}
+
+pub fn execute_direct_move_with_options(
+    paths: &[PathBuf],
+    target_dir: &Path,
+    dry_run: bool,
+    allow_special_paths: bool,
+) -> Result<Vec<OperationLogEntry>> {
+    let mut logs = Vec::new();
+
+    for path in paths {
+        if !is_safe_direct_move_path(path, allow_special_paths) {
+            logs.push(OperationLogEntry {
+                at: Utc::now(),
+                path: path.clone(),
+                mode: ExecutionMode::Move,
+                dry_run,
+                success: false,
+                detail: "该路径不属于迁移助手允许的一键迁移范围，已拒绝执行。".to_string(),
+                diagnosis: None,
+            });
+            continue;
+        }
+
+        match move_path(path, Some(target_dir), dry_run) {
+            Ok(detail) => logs.push(OperationLogEntry {
+                at: Utc::now(),
+                path: path.clone(),
+                mode: ExecutionMode::Move,
+                dry_run,
+                success: true,
+                detail,
+                diagnosis: None,
+            }),
+            Err(err) => logs.push(OperationLogEntry {
+                at: Utc::now(),
+                path: path.clone(),
+                mode: ExecutionMode::Move,
+                dry_run,
+                success: false,
+                detail: err.detail,
+                diagnosis: Some(err.diagnosis),
+            }),
+        }
+    }
+
+    Ok(logs)
+}
+
 fn recycle_path(path: &Path, dry_run: bool) -> std::result::Result<String, ExecutionFailure> {
     if !path.exists() {
         return Err(ExecutionFailure::message_only(
@@ -303,6 +358,35 @@ fn copy_io_error(error: &io::Error) -> io::Error {
     } else {
         io::Error::new(error.kind(), error.to_string())
     }
+}
+
+fn is_safe_direct_move_path(path: &Path, allow_special_paths: bool) -> bool {
+    let text = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+
+    if text.starts_with("c:/windows/")
+        || text.starts_with("c:/program files/")
+        || text.starts_with("c:/program files (x86)/")
+        || text.starts_with("c:/programdata/")
+        || text.contains("/appdata/")
+    {
+        return false;
+    }
+
+    if !allow_special_paths
+        && (text.contains("/wechat files/")
+            || text.contains("/anaconda3/")
+            || text.contains("/miniconda3/")
+            || text.contains("/miniforge3/")
+            || text.contains("/mambaforge/")
+            || text.contains("/.conda/"))
+    {
+        return false;
+    }
+
+    path.is_absolute()
 }
 
 #[cfg(test)]

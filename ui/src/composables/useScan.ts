@@ -20,7 +20,7 @@ export function useScan() {
         progress.value = evt;
       };
 
-      const result = await invoke<ScanReport>("start_scan", {
+      const result = await invoke<ScanReport>("start_scan_v2", {
         path,
         onProgress,
       });
@@ -42,5 +42,16 @@ export function useScan() {
     }
   }
 
-  return { scanning, report, error, progress, startScan, cancelScan };
+  async function getLatestScanReport(): Promise<ScanReport | null> {
+    try {
+      const result = await invoke<ScanReport>("get_latest_scan_report");
+      report.value = result;
+      return result;
+    } catch (e: any) {
+      error.value = typeof e === "string" ? e : e.message || String(e);
+      return null;
+    }
+  }
+
+  return { scanning, report, error, progress, startScan, cancelScan, getLatestScanReport };
 }

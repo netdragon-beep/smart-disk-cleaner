@@ -6,7 +6,7 @@ export const useAppStore = defineStore("app", () => {
   const report = ref<ScanReport | null>(null);
   const history = ref<OperationLogEntry[]>([]);
   const config = ref<AppConfig | null>(null);
-  const theme = ref<"light" | "dark">("dark");
+  const theme = ref<"light" | "dark">("light");
 
   function setReport(r: ScanReport | null) {
     report.value = r;

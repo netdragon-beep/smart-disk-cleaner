@@ -1,5 +1,8 @@
 use crate::ai_advisor::AdvisorConfig;
-use crate::models::{ProcessAiInsight, ProcessRecord, ProcessSuggestedAction, RiskLevel};
+use crate::models::{
+    ProcessAiFollowUpAnswer, ProcessAiFollowUpTurn, ProcessAiInsight, ProcessRecord,
+    ProcessSuggestedAction, RiskLevel,
+};
 use anyhow::{anyhow, Result};
 use humansize::{format_size, BINARY};
 use reqwest::Client;
@@ -28,6 +31,44 @@ pub async fn explain_process(
         Err(error) => {
             warn!("AI process insight failed, falling back to local rules: {error}");
             let mut fallback = local_insight;
+            fallback.remote_attempted = true;
+            fallback.used_fallback = true;
+            fallback.fallback_reason = Some(error.to_string());
+            Ok(fallback)
+        }
+    }
+}
+
+pub async fn answer_process_follow_up(
+    process: &ProcessRecord,
+    insight: &ProcessAiInsight,
+    question: &str,
+    history: &[ProcessAiFollowUpTurn],
+    config: &AdvisorConfig,
+) -> Result<ProcessAiFollowUpAnswer> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err(anyhow!("追问内容不能为空"));
+    }
+
+    let local_answer = build_local_follow_up_answer(process, insight, question, history);
+
+    let Some(api_key) = config
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(local_answer);
+    };
+
+    match request_remote_process_follow_up(process, insight, question, history, config, api_key)
+        .await
+    {
+        Ok(answer) => Ok(answer),
+        Err(error) => {
+            warn!("AI process follow-up failed, falling back to local rules: {error}");
+            let mut fallback = local_answer;
             fallback.remote_attempted = true;
             fallback.used_fallback = true;
             fallback.fallback_reason = Some(error.to_string());
@@ -202,6 +243,95 @@ fn build_local_process_insight(process: &ProcessRecord) -> ProcessAiInsight {
         suggested_action,
         risk,
         reason,
+        remote_attempted: false,
+        used_fallback: false,
+        fallback_reason: None,
+    }
+}
+
+fn build_local_follow_up_answer(
+    process: &ProcessRecord,
+    insight: &ProcessAiInsight,
+    question: &str,
+    history: &[ProcessAiFollowUpTurn],
+) -> ProcessAiFollowUpAnswer {
+    let normalized = question.to_ascii_lowercase();
+    let answer = if contains_any(
+        &normalized,
+        &["结束", "关闭", "kill", "terminate", "删", "删除"],
+    ) {
+        format!(
+            "{} 当前建议是“{}”，风险等级为“{}”。{}",
+            process.name,
+            process_action_label(insight.suggested_action),
+            risk_label(insight.risk),
+            match insight.suggested_action {
+                ProcessSuggestedAction::AvoidEnd => {
+                    "从当前分类和路径看，它更接近系统关键、安全防护或重要后台进程，不建议直接结束。"
+                }
+                ProcessSuggestedAction::EndAfterSave => {
+                    "它更像用户正在使用或可能正在写入数据的应用，建议先保存工作，再考虑结束。"
+                }
+                ProcessSuggestedAction::Review => {
+                    "它不一定不能结束，但最好先确认是否承担同步、更新、容器或后台服务职责。"
+                }
+                ProcessSuggestedAction::SafeToEnd => {
+                    "从当前元数据看更像辅助进程或短时后台任务，确认无依赖后通常可以尝试结束。"
+                }
+            }
+        )
+    } else if contains_any(&normalized, &["做什么", "用途", "是什么", "干嘛"]) {
+        let exe_path = process
+            .exe_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "未知路径".to_string());
+        let command = if process.command.is_empty() {
+            "没有采集到命令行参数".to_string()
+        } else {
+            process.command.join(" ")
+        };
+
+        format!(
+            "{} 大概率属于“{}”。可执行路径：{}。命令行：{}。{}",
+            process.name,
+            category_label(&process.category),
+            exe_path,
+            command,
+            insight.summary
+        )
+    } else if contains_any(
+        &normalized,
+        &["卡", "占用", "cpu", "内存", "磁盘", "慢", "高", "资源"],
+    ) {
+        format!(
+            "这次采样里它的 CPU 为 {:.1}%，内存约 {}，磁盘读写约 {}/s，综合压力分 {:.1}。{}",
+            process.cpu_usage,
+            format_size(process.memory_bytes, BINARY),
+            format_size(process.disk_read_bytes + process.disk_written_bytes, BINARY),
+            process.resource_score,
+            resource_pressure_text(process)
+        )
+    } else if contains_any(&normalized, &["不处理", "放着", "影响", "后果"]) {
+        format!(
+            "{}。如果暂时不处理，通常意味着它会继续保持当前的资源占用模式；如果这正是导致卡顿的元凶，卡顿现象可能持续或再次出现。",
+            insight.reason
+        )
+    } else {
+        format!(
+            "基于当前进程名、路径、命令行和资源占用，我的保守判断是：{}。如果你想更具体一些，可以继续问“结束它会有什么影响？”、“它为什么占用这么高？”或“这个进程主要是做什么的？”。",
+            insight.summary
+        )
+    };
+
+    let answer = format!("{answer}{}", build_history_suffix(history));
+
+    ProcessAiFollowUpAnswer {
+        pid: process.pid,
+        name: process.name.clone(),
+        question: question.to_string(),
+        answer,
+        source: "local_rules".to_string(),
         remote_attempted: false,
         used_fallback: false,
         fallback_reason: None,
@@ -437,6 +567,82 @@ async fn request_remote_process_insight(
     })
 }
 
+async fn request_remote_process_follow_up(
+    process: &ProcessRecord,
+    insight: &ProcessAiInsight,
+    question: &str,
+    history: &[ProcessAiFollowUpTurn],
+    config: &AdvisorConfig,
+    api_key: &str,
+) -> Result<ProcessAiFollowUpAnswer> {
+    let conversation_history: Vec<_> = history
+        .iter()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|turn| {
+            json!({
+                "question": turn.question,
+                "answer": turn.answer,
+            })
+        })
+        .collect();
+
+    let payload = json!({
+        "pid": process.pid,
+        "parent_pid": process.parent_pid,
+        "name": process.name,
+        "exe_path": process.exe_path,
+        "command": process.command,
+        "cpu_usage": process.cpu_usage,
+        "memory_bytes": process.memory_bytes,
+        "virtual_memory_bytes": process.virtual_memory_bytes,
+        "disk_read_bytes": process.disk_read_bytes,
+        "disk_written_bytes": process.disk_written_bytes,
+        "run_time_seconds": process.run_time_seconds,
+        "status": process.status,
+        "category": process.category,
+        "is_critical": process.is_critical,
+        "resource_score": process.resource_score,
+        "current_summary": insight.summary,
+        "current_reason": insight.reason,
+        "current_action": insight.suggested_action,
+        "current_risk": insight.risk,
+        "conversation_history": conversation_history,
+        "user_question": question,
+    });
+
+    let content = send_chat_completion(
+        config,
+        api_key,
+        "You are a Windows process diagnosis assistant. Answer in concise Chinese. Be conservative. Never claim certainty you do not have. Never recommend ending critical system or security processes.",
+        &format!(
+            "请根据下面的 Windows 进程信息和已有诊断结果，回答用户的追问。只输出一个 JSON 对象，格式为 {{\"answer\":\"中文回答\"}}。不要输出 Markdown。不要假装知道进程内部业务，只能基于进程名、路径、命令行、资源占用和已有诊断做保守判断。输入：{}",
+            serde_json::to_string(&payload)?
+        ),
+    )
+    .await?;
+
+    let response = parse_process_follow_up_response(&content)?;
+    let answer = non_empty_or(
+        response.answer,
+        build_local_follow_up_answer(process, insight, question, history).answer,
+    );
+
+    Ok(ProcessAiFollowUpAnswer {
+        pid: process.pid,
+        name: process.name.clone(),
+        question: question.to_string(),
+        answer,
+        source: format!("remote:{}", config.model),
+        remote_attempted: true,
+        used_fallback: false,
+        fallback_reason: None,
+    })
+}
+
 async fn send_chat_completion(
     config: &AdvisorConfig,
     api_key: &str,
@@ -496,6 +702,22 @@ fn parse_process_insight_response(content: &str) -> Result<ProcessInsightRespons
     Err(anyhow!("AI 返回内容不是可解析的进程诊断 JSON。"))
 }
 
+fn parse_process_follow_up_response(content: &str) -> Result<ProcessFollowUpResponse> {
+    let trimmed = content.trim();
+    if let Ok(parsed) = serde_json::from_str::<ProcessFollowUpResponse>(trimmed) {
+        return Ok(parsed);
+    }
+
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        let json_slice = &trimmed[start..=end];
+        if let Ok(parsed) = serde_json::from_str::<ProcessFollowUpResponse>(json_slice) {
+            return Ok(parsed);
+        }
+    }
+
+    Err(anyhow!("AI 返回内容不是可解析的进程追问 JSON"))
+}
+
 fn non_empty_or(value: String, fallback: String) -> String {
     if value.trim().is_empty() {
         fallback
@@ -504,12 +726,44 @@ fn non_empty_or(value: String, fallback: String) -> String {
     }
 }
 
+fn build_history_suffix(history: &[ProcessAiFollowUpTurn]) -> String {
+    match history.last() {
+        Some(last) => format!(
+            " 上一轮你问的是“{}”，当时的回答重点是：{}。",
+            last.question.trim(),
+            truncate_text(last.answer.trim(), 120)
+        ),
+        None => String::new(),
+    }
+}
+
+fn truncate_text(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        text.to_string()
+    } else {
+        format!(
+            "{}...",
+            chars.into_iter().take(max_chars).collect::<String>()
+        )
+    }
+}
+
+fn contains_any(question: &str, keywords: &[&str]) -> bool {
+    keywords.iter().any(|keyword| question.contains(keyword))
+}
+
 #[derive(Debug, Deserialize)]
 struct ProcessInsightResponse {
     summary: String,
     suggested_action: ProcessSuggestedAction,
     risk: RiskLevel,
     reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProcessFollowUpResponse {
+    answer: String,
 }
 
 #[derive(Debug, Deserialize)]

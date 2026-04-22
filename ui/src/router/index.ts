@@ -19,6 +19,11 @@ const router = createRouter({
       component: () => import("@/views/CleanupView.vue"),
     },
     {
+      path: "/migration",
+      name: "migration",
+      component: () => import("@/views/MigrationView.vue"),
+    },
+    {
       path: "/history",
       name: "history",
       component: () => import("@/views/HistoryView.vue"),
@@ -26,7 +31,7 @@ const router = createRouter({
     {
       path: "/processes",
       name: "processes",
-      component: () => import("@/views/ProcessesSortedView.vue"),
+      component: () => import("@/views/ProcessesMonitorChartsView.vue"),
     },
     {
       path: "/settings",

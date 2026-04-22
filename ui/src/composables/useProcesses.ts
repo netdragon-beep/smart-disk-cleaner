@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { AppConfig, ProcessAiInsight, ProcessRecord } from "@/types";
+import type {
+  AppConfig,
+  ProcessAiFollowUpAnswer,
+  ProcessAiFollowUpTurn,
+  ProcessAiInsight,
+  ProcessMonitorSnapshot,
+  ProcessRecord,
+} from "@/types";
 
 export function useProcesses() {
   const processes = ref<ProcessRecord[]>([]);
@@ -9,6 +16,8 @@ export function useProcesses() {
 
   const explaining = ref(false);
   const explainError = ref<string | null>(null);
+  const followUpLoading = ref(false);
+  const followUpError = ref<string | null>(null);
 
   const terminating = ref(false);
   const terminateError = ref<string | null>(null);
@@ -18,6 +27,16 @@ export function useProcesses() {
     config?: AppConfig | null
   ): Promise<ProcessAiInsight> {
     return await invoke<ProcessAiInsight>("explain_process_with_ai", { pid, config });
+  }
+
+  async function loadMonitorSnapshot(limit = 12): Promise<ProcessMonitorSnapshot | null> {
+    error.value = null;
+    try {
+      return await invoke<ProcessMonitorSnapshot>("get_process_monitor_snapshot", { limit });
+    } catch (e: any) {
+      error.value = typeof e === "string" ? e : e.message || String(e);
+      return null;
+    }
   }
 
   async function loadProcesses(limit = 30): Promise<ProcessRecord[]> {
@@ -52,6 +71,29 @@ export function useProcesses() {
     }
   }
 
+  async function askProcessFollowUp(
+    pid: number,
+    question: string,
+    history: ProcessAiFollowUpTurn[] = [],
+    config?: AppConfig | null
+  ): Promise<ProcessAiFollowUpAnswer | null> {
+    followUpLoading.value = true;
+    followUpError.value = null;
+    try {
+      return await invoke<ProcessAiFollowUpAnswer>("ask_process_follow_up_with_ai", {
+        pid,
+        question,
+        history,
+        config,
+      });
+    } catch (e: any) {
+      followUpError.value = typeof e === "string" ? e : e.message || String(e);
+      return null;
+    } finally {
+      followUpLoading.value = false;
+    }
+  }
+
   async function terminateProcess(pid: number): Promise<string | null> {
     terminating.value = true;
     terminateError.value = null;
@@ -71,10 +113,14 @@ export function useProcesses() {
     error,
     explaining,
     explainError,
+    followUpLoading,
+    followUpError,
     terminating,
     terminateError,
     loadProcesses,
     requestProcessInsight,
+    askProcessFollowUp,
+    loadMonitorSnapshot,
     explainProcess,
     terminateProcess,
   };
