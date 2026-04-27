@@ -17,9 +17,11 @@ import {
   NSwitch,
   NList,
   NListItem,
+  useMessage,
   type DataTableColumns,
   type DataTableRowKey,
 } from "naive-ui";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "@/stores/app";
 import { useCleanup } from "@/composables/useCleanup";
 import { useProcesses } from "@/composables/useProcesses";
@@ -43,14 +45,18 @@ const TEXT = {
   recycleBin: "\u56DE\u6536\u7AD9",
   moveLabel: "\u79FB\u52A8",
   targetDir: "\u76EE\u6807\u76EE\u5F55...",
+  browse: "\u6D4F\u89C8",
   dryRun: "\u6A21\u62DF\u8FD0\u884C",
   chooseFiles: "\u9009\u62E9\u6587\u4EF6",
   protectedNotice: "\u5176\u4E2D\u90E8\u5206\u6587\u4EF6\u88AB\u6807\u8BB0\u4E3A\u201C\u4FDD\u7559\u201D\u6216\u201C\u5F85\u5BA1\u201D\uFF0C\u5DF2\u7981\u6B62\u5728\u8FD9\u91CC\u76F4\u63A5\u6267\u884C\u6E05\u7406\u3002",
   executeCleanup: "\u6267\u884C\u6E05\u7406",
+  executeMove: "\u6267\u884C\u79FB\u52A8",
   selected: "\u5DF2\u9009",
   item: "\u9879",
   error: "\u9519\u8BEF",
   confirmCleanup: "\u786E\u8BA4\u6E05\u7406",
+  confirmMove: "\u786E\u8BA4\u79FB\u52A8",
+  confirmMoveAction: "\u786E\u8BA4\u79FB\u52A8",
   simulate: "\u6A21\u62DF",
   execute: "\u6267\u884C",
   recycle: "\u56DE\u6536",
@@ -60,6 +66,7 @@ const TEXT = {
   fileQuestionSuffix: "\u4E2A\u6587\u4EF6\uFF1F",
   realChangeWarning: "\u8FD9\u5C06\u5BF9\u60A8\u7684\u6587\u4EF6\u7CFB\u7EDF\u8FDB\u884C\u771F\u5B9E\u66F4\u6539\uFF01",
   executionResult: "\u6267\u884C\u7ED3\u679C",
+  moveResult: "\u79FB\u52A8\u7ED3\u679C",
   success: "\u6210\u529F",
   failed: "\u5931\u8D25",
   blockedTitle: "占用进程处理",
@@ -93,6 +100,7 @@ const riskLabels: Record<string, string> = {
 
 const router = useRouter();
 const store = useAppStore();
+const message = useMessage();
 const { executing, logs, error, executeCleanup, getPathBlockers } = useCleanup();
 const { terminateProcess, terminating, terminateError } = useProcesses();
 
@@ -188,6 +196,10 @@ function rowKey(row: FileSuggestion) {
 
 function handleConfirm() {
   if (selectedPaths.value.length === 0) return;
+  if (mode.value === "move" && !targetDir.value.trim()) {
+    message.error("请先选择目标目录");
+    return;
+  }
   showConfirm.value = true;
 }
 
@@ -203,6 +215,18 @@ async function handleExecute() {
   if (result.length > 0) {
     store.addHistory(result);
     showResults.value = true;
+
+    // 如果不是模拟运行，从列表中移除已成功清理的文件
+    if (!dryRun.value) {
+      const successfulPaths = result.filter((entry) => entry.success).map((entry) => entry.path);
+      if (successfulPaths.length > 0) {
+        store.removeCleanedSuggestions(successfulPaths);
+        // 同时清空选中的路径
+        selectedPaths.value = selectedPaths.value.filter(
+          (p) => !successfulPaths.includes(String(p))
+        );
+      }
+    }
   }
 }
 
@@ -232,6 +256,13 @@ async function handleTerminateBlocker(pid: number) {
   await terminateProcess(pid);
   if (!terminateError.value && blockerPath.value) {
     blockers.value = await getPathBlockers(blockerPath.value);
+  }
+}
+
+async function pickTargetDirectory() {
+  const selected = await open({ directory: true, multiple: false });
+  if (selected && typeof selected === "string") {
+    targetDir.value = selected;
   }
 }
 
@@ -304,12 +335,16 @@ async function retryCurrentEntry() {
           <n-radio-button value="recycle">{{ TEXT.recycleBin }}</n-radio-button>
           <n-radio-button value="move">{{ TEXT.moveLabel }}</n-radio-button>
         </n-radio-group>
-        <n-input
-          v-if="mode === 'move'"
-          v-model:value="targetDir"
-          :placeholder="TEXT.targetDir"
-          class="cleanup-target-input"
-        />
+        <div v-if="mode === 'move'" class="cleanup-target-row">
+          <n-input
+            v-model:value="targetDir"
+            :placeholder="TEXT.targetDir"
+            class="cleanup-target-input"
+          />
+          <n-button secondary @click="pickTargetDirectory">
+            {{ TEXT.browse }}
+          </n-button>
+        </div>
         <div class="cleanup-switch">
           <n-text>{{ TEXT.dryRun }}</n-text>
           <n-switch v-model:value="dryRun" />
@@ -356,11 +391,11 @@ async function retryCurrentEntry() {
           </div>
           <n-button
             type="primary"
-            :disabled="selectedPaths.length === 0 || executing"
+            :disabled="selectedPaths.length === 0 || (mode.value === 'move' && !targetDir.value.trim()) || executing"
             :loading="executing"
             @click="handleConfirm"
           >
-            {{ TEXT.executeCleanup }} ({{ TEXT.selected }} {{ selectedPaths.length }} {{ TEXT.item }})
+            {{ mode.value === 'move' ? TEXT.move : TEXT.executeCleanup }} ({{ TEXT.selected }} {{ selectedPaths.length }} {{ TEXT.item }})
           </n-button>
         </div>
       </n-space>
@@ -373,15 +408,15 @@ async function retryCurrentEntry() {
     <n-modal
       v-model:show="showConfirm"
       preset="dialog"
-      :title="TEXT.confirmCleanup"
-      :positive-text="dryRun ? TEXT.simulateRun : TEXT.confirmExecute"
+      :title="mode === 'move' ? TEXT.confirmMove : TEXT.confirmCleanup"
+      :positive-text="dryRun ? TEXT.simulateRun : (mode === 'move' ? TEXT.confirmMoveAction : TEXT.confirmExecute)"
       :negative-text="TEXT.cancel"
       @positive-click="handleExecute"
       :type="dryRun ? 'info' : 'warning'"
     >
       <n-text>
-        {{ dryRun ? TEXT.simulate : TEXT.execute }}
-        {{ mode === 'recycle' ? TEXT.recycle : TEXT.moveLabel }}
+        {{ dryRun ? TEXT.simulate : (mode === 'move' ? TEXT.move : TEXT.execute) }}
+        {{ mode === 'recycle' ? TEXT.recycle : '' }}
         {{ selectedPaths.length }} {{ TEXT.fileQuestionSuffix }}
       </n-text>
       <n-alert v-if="!dryRun" type="warning" style="margin-top: 12px">
@@ -389,7 +424,7 @@ async function retryCurrentEntry() {
       </n-alert>
     </n-modal>
 
-    <n-modal v-model:show="showResults" preset="card" :title="TEXT.executionResult" style="width: 600px">
+    <n-modal v-model:show="showResults" preset="card" :title="mode === 'move' ? TEXT.moveResult : TEXT.executionResult" style="width: 600px">
       <n-space vertical :size="8">
         <div v-for="(entry, idx) in logs" :key="idx" class="cleanup-log-row">
           <n-tag :type="entry.success ? 'success' : 'error'" size="small" round>
@@ -494,6 +529,12 @@ async function retryCurrentEntry() {
   align-items: center;
 }
 
+.cleanup-target-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .cleanup-target-input {
   width: 320px;
 }
@@ -542,8 +583,12 @@ async function retryCurrentEntry() {
     margin-left: 0;
   }
 
-  .cleanup-target-input {
+  .cleanup-target-row {
     width: 100%;
+  }
+
+  .cleanup-target-input {
+    flex: 1;
   }
 
   .cleanup-action-bar {

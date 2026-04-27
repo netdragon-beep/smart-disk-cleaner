@@ -1,7 +1,8 @@
 use crate::state::AppState;
 use chrono::Utc;
 use serde::Deserialize;
-use serde_yaml::{Mapping, Sequence, Value};
+use serde_json::Value as JsonValue;
+use serde_yaml::{Mapping, Sequence, Value as YamlValue};
 use smart_disk_cleaner_core::ai_advisor::AdvisorConfig;
 use smart_disk_cleaner_core::migration_advisor::build_migration_advice;
 use smart_disk_cleaner_core::migration_planner::refine_plan_with_ai;
@@ -24,9 +25,9 @@ use tauri::State;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationPlanExecutionRequest {
-    plan: MigrationPlan,
-    selected_action_ids: Vec<String>,
-    dry_run: bool,
+    pub plan: MigrationPlan,
+    pub selected_action_ids: Vec<String>,
+    pub dry_run: bool,
 }
 
 #[tauri::command]
@@ -487,27 +488,27 @@ fn update_yaml_list_file(
     });
 
     let mut root = if let Some(text) = previous.as_deref() {
-        serde_yaml::from_str::<Value>(text).unwrap_or_else(|_| Value::Mapping(Mapping::new()))
+        serde_yaml::from_str::<YamlValue>(text).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
     } else {
-        Value::Mapping(Mapping::new())
+        YamlValue::Mapping(Mapping::new())
     };
     let mapping = root
         .as_mapping_mut()
         .ok_or("配置文件不是可编辑的 YAML 映射结构。".to_string())?;
 
     let mut values = Sequence::new();
-    let key_value = Value::String(key.to_string());
-    if let Some(Value::Sequence(existing)) = mapping.get(&key_value) {
+    let key_value = YamlValue::String(key.to_string());
+    if let Some(YamlValue::Sequence(existing)) = mapping.get(&key_value) {
         for item in existing {
-            if let Value::String(text) = item {
+            if let YamlValue::String(text) = item {
                 if text != value {
-                    values.push(Value::String(text.clone()));
+                    values.push(YamlValue::String(text.clone()));
                 }
             }
         }
     }
-    values.insert(0, Value::String(value.to_string()));
-    mapping.insert(key_value, Value::Sequence(values));
+    values.insert(0, YamlValue::String(value.to_string()));
+    mapping.insert(key_value, YamlValue::Sequence(values));
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败：{error}"))?;
@@ -554,9 +555,9 @@ fn set_user_env_var(
         }),
     });
 
-    let output = set_user_env_var_platform(name, Some(value))
+    let status = set_user_env_var_platform(name, Some(value))
         .map_err(|error| format!("设置环境变量 {name} 失败：{error}"))?;
-    if !output.success() {
+    if !status.success() {
         return Ok(failure_log(
             Path::new("."),
             false,
@@ -755,10 +756,10 @@ fn verify_path_exists(path: &Path, dry_run: bool) -> Result<OperationLogEntry, S
 
 fn restore_file_snapshot(
     path: &Path,
-    content: Option<serde_json::Value>,
+    content: Option<JsonValue>,
 ) -> Result<OperationLogEntry, String> {
     match content {
-        Some(serde_json::Value::String(text)) => {
+        Some(JsonValue::String(text)) => {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|error| format!("恢复配置目录失败：{error}"))?;
             }
@@ -769,7 +770,7 @@ fn restore_file_snapshot(
                 format!("已恢复配置文件 {}。", path.display()),
             ))
         }
-        Some(serde_json::Value::Null) | None => {
+        Some(JsonValue::Null) | None => {
             if path.exists() {
                 fs::remove_file(path).map_err(|error| format!("删除新增配置文件失败：{error}"))?;
             }
@@ -785,17 +786,17 @@ fn restore_file_snapshot(
 
 fn restore_env_var(
     name: &str,
-    value: Option<serde_json::Value>,
+    value: Option<JsonValue>,
 ) -> Result<OperationLogEntry, String> {
     let value_text = match value {
-        Some(serde_json::Value::String(text)) => Some(text),
-        Some(serde_json::Value::Null) | None => None,
+        Some(JsonValue::String(text)) => Some(text),
+        Some(JsonValue::Null) | None => None,
         _ => return Err("环境变量回滚快照格式不正确。".to_string()),
     };
 
-    let output = set_user_env_var_platform(name, value_text.as_deref())
+    let status = set_user_env_var_platform(name, value_text.as_deref())
         .map_err(|error| format!("恢复环境变量 {name} 失败：{error}"))?;
-    if !output.success() {
+    if !status.success() {
         return Ok(failure_log(
             Path::new("."),
             false,
@@ -910,7 +911,7 @@ fn simple_diagnosis(
         code,
         severity,
         summary: summary.clone(),
-        details: vec![summary.clone()],
+        details: vec![summary],
         suggestions: vec!["请检查迁移计划、目标路径和相关程序状态后重试。".to_string()],
         possible_related_apps: Vec::new(),
         error_kind: None,
@@ -957,7 +958,7 @@ New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop | Out-
             &target_path.to_string_lossy(),
         ])
         .output()
-        .map_err(|error| format!("创建 Junction 失败：{error}"))?;
+        .map_err(|error| format!("创建 Junction 失败：{}", error))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -965,7 +966,7 @@ New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop | Out-
         Err(if stderr.is_empty() {
             "创建 Junction 失败。".to_string()
         } else {
-            format!("创建 Junction 失败：{stderr}")
+            format!("创建 Junction 失败：{}", stderr)
         })
     }
 }
@@ -973,17 +974,17 @@ New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop | Out-
 #[cfg(target_os = "macos")]
 fn create_compat_link_platform(source_path: &Path, target_path: &Path) -> Result<(), String> {
     std::os::unix::fs::symlink(target_path, source_path)
-        .map_err(|error| format!("创建符号链接失败：{error}"))
+        .map_err(|error| format!("创建符号链接失败：{}", error))
 }
 
 #[cfg(target_os = "windows")]
 fn remove_compat_link_platform(path: &Path) -> Result<(), String> {
-    fs::remove_dir(path).map_err(|error| format!("移除 Junction 失败：{error}"))
+    fs::remove_dir(path).map_err(|error| format!("移除 Junction 失败：{}", error))
 }
 
 #[cfg(target_os = "macos")]
 fn remove_compat_link_platform(path: &Path) -> Result<(), String> {
-    fs::remove_file(path).map_err(|error| format!("移除符号链接失败：{error}"))
+    fs::remove_file(path).map_err(|error| format!("移除符号链接失败：{}", error))
 }
 
 #[cfg(target_os = "windows")]
@@ -1015,17 +1016,17 @@ fn set_user_env_var_platform(name: &str, value: Option<&str>) -> Result<ExitStat
     let profile_path = dirs_next::home_dir()
         .unwrap_or_else(|| PathBuf::from("/Users/Shared"))
         .join(".zprofile");
-    let marker = format!("# smart-disk-cleaner:{name}");
+    let marker = format!("# smart-disk-cleaner:{}", name);
     let mut lines = fs::read_to_string(&profile_path)
         .unwrap_or_default()
         .lines()
-        .filter(|line| !line.contains(&marker) && !line.starts_with(&format!("export {name}=")))
+        .filter(|line| !line.contains(&marker) && !line.starts_with(&format!("export {}", name)))
         .map(|line| line.to_string())
         .collect::<Vec<_>>();
 
     if let Some(value) = value {
         lines.push(marker);
-        lines.push(format!("export {name}=\"{}\"", value.replace('"', "\\\"")));
+        lines.push(format!("export {}=\"{}\"", name, value.replace("\"", "\\\"")));
     }
 
     fs::write(
@@ -1041,5 +1042,5 @@ fn set_user_env_var_platform(name: &str, value: Option<&str>) -> Result<ExitStat
 
 #[cfg(target_os = "macos")]
 fn shell_escape(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    format!("'{}'", value.replace("'", "'\\''"))
 }

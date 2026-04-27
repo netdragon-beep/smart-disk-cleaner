@@ -31,6 +31,15 @@ export const useAppStore = defineStore("app", () => {
     theme.value = theme.value === "dark" ? "light" : "dark";
   }
 
+  function removeCleanedSuggestions(successfulPaths: string[]) {
+    if (!report.value) return;
+
+    // 从建议列表中移除成功清理的文件
+    report.value.advisor.suggestions = report.value.advisor.suggestions.filter(
+      (s) => !successfulPaths.includes(s.path)
+    );
+  }
+
   return {
     report,
     history,
@@ -41,5 +50,6 @@ export const useAppStore = defineStore("app", () => {
     setHistory,
     setConfig,
     toggleTheme,
+    removeCleanedSuggestions,
   };
 });

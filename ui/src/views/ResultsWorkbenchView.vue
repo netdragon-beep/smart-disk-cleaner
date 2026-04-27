@@ -115,7 +115,7 @@ const TEXT = {
   aiInspectFailed: "路径 AI 解读失败",
   aiInspectRemoteSuccess: "已成功调用远程 AI 模型",
   aiInspectFallbackTitle: "远程 AI 调用失败，已回退本地规则",
-  aiInspectLocalOnlyTitle: "当前未调用远程 AI，展示的是本地规则结果",
+  aiInspectLocalOnlyTitle: "当前使用本地规则分析",
   aiInspectFallbackReason: "回退原因",
   aiInspectReason: "处理建议说明",
   aiInspectSummary: "AI 解读结论",
@@ -781,6 +781,13 @@ async function handleFileAiAction(path: string) {
     return;
   }
 
+  // 检查是否配置了 API Key
+  const hasApiKey = Boolean(store.config?.apiKey?.trim());
+  if (!hasApiKey) {
+    message.info("AI 解读需要先配置 API Key，请先去设置页面配置。");
+    return;
+  }
+
   void queueFileInsight(path);
   message.info("已开始后台解读，你可以继续查看其它文件或目录。");
 }
@@ -1199,10 +1206,10 @@ function duplicateTagLabel(path: string): string {
 
             <n-alert
               v-else-if="!selectedAiInsight.remoteAttempted && selectedAiInsight.source === 'local_rules'"
-              type="info"
+              type="warning"
               :title="TEXT.aiInspectLocalOnlyTitle"
             >
-              {{ TEXT.localRules }}
+              当前只显示了本地规则分析结果。如需 AI 智能解读，请先在设置页面配置 API Key。
             </n-alert>
 
             <n-alert

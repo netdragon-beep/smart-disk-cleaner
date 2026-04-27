@@ -16,6 +16,7 @@ import {
   NTooltip,
   dateZhCN,
   zhCN,
+  darkTheme,
   type GlobalThemeOverrides,
   type MenuOption,
 } from "naive-ui";
@@ -75,7 +76,9 @@ const currentPage = computed(
 const viewKey = computed(() => `${route.fullPath}:${renderEpoch.value}`);
 const activeKey = computed(() => (route.name as string) || "scan");
 
-const themeOverrides: GlobalThemeOverrides = {
+const isDark = computed(() => store.theme === "dark");
+
+const lightThemeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: "#17856c",
     primaryColorHover: "#22957a",
@@ -161,6 +164,96 @@ const themeOverrides: GlobalThemeOverrides = {
   },
 };
 
+const darkThemeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: "#22c55e",
+    primaryColorHover: "#4ade80",
+    primaryColorPressed: "#16a34a",
+    primaryColorSuppl: "#22c55e",
+    infoColor: "#3b82f6",
+    successColor: "#22c55e",
+    warningColor: "#f59e0b",
+    errorColor: "#ef4444",
+    borderRadius: "18px",
+    borderColor: "#273549",
+    textColorBase: "#e2e8f0",
+    textColor1: "#f1f5f9",
+    textColor2: "#cbd5e1",
+    textColor3: "#94a3b8",
+    bodyColor: "#0f172a",
+    cardColor: "#1e293b",
+    tableColor: "#1e293b",
+    modalColor: "#1e293b",
+    popoverColor: "#1e293b",
+  },
+  Layout: {
+    siderColor: "#1e293b",
+    color: "#0f172a",
+    contentColor: "#0f172a",
+    headerColor: "#0f172a",
+    siderBorderColor: "#334155",
+  },
+  Card: {
+    color: "#1e293b",
+    colorEmbedded: "#0f172a",
+    borderColor: "#334155",
+    borderRadius: "22px",
+    boxShadow: "0 18px 42px rgba(0, 0, 0, 0.45)",
+    titleTextColor: "#f1f5f9",
+    textColor: "#cbd5e1",
+  },
+  DataTable: {
+    thColor: "#0f172a",
+    thColorHover: "#1e293b",
+    tdColor: "#1e293b",
+    tdColorHover: "#334155",
+    borderColor: "#273549",
+  },
+  Input: {
+    borderHover: "#22c55e",
+    borderFocus: "#22c55e",
+    color: "#1e293b",
+    boxShadowFocus: "0 0 0 3px rgba(34, 197, 94, 0.14)",
+  },
+  Select: {
+    peers: {
+      InternalSelection: {
+        borderHover: "#22c55e",
+        borderFocus: "#22c55e",
+        boxShadowFocus: "0 0 0 3px rgba(34, 197, 94, 0.14)",
+      },
+    },
+  },
+  Button: {
+    borderRadiusMedium: "14px",
+    borderRadiusSmall: "12px",
+    fontWeight: "600",
+  },
+  Menu: {
+    itemTextColorActive: "#22c55e",
+    itemTextColorHover: "#f1f5f9",
+    itemTextColorActiveHover: "#22c55e",
+    itemTextColorChildActive: "#22c55e",
+    itemColorHover: "#334155",
+    itemColorActive: "#1e293b",
+    itemColorActiveHover: "#1e293b",
+    arrowColorActive: "#22c55e",
+  },
+  Tag: {
+    borderRadius: "999px",
+  },
+  Alert: {
+    borderRadius: "18px",
+  },
+  Modal: {
+    borderRadius: "24px",
+  },
+};
+
+const themeOverrides = computed(() =>
+  isDark.value ? darkThemeOverrides : lightThemeOverrides
+);
+
 function buildMenuOption(label: string, key: string, description: string): MenuOption {
   return {
     key,
@@ -219,6 +312,18 @@ onErrorCaptured((error) => {
   return false;
 });
 
+watch(
+  () => store.theme,
+  (newTheme) => {
+    if (newTheme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(async () => {
   const cfg = await loadConfig();
   if (cfg) {
@@ -228,7 +333,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider
+    :theme="isDark ? darkTheme : undefined"
+    :theme-overrides="themeOverrides"
+    :locale="zhCN"
+    :date-locale="dateZhCN"
+  >
     <n-message-provider>
       <n-layout has-sider class="app-shell">
         <n-layout-sider
@@ -250,7 +360,9 @@ onMounted(async () => {
           </div>
 
           <div class="sider-note">
-            <n-tag size="small" type="success" round>白色主题</n-tag>
+            <n-tag size="small" type="success" round>
+              {{ isDark ? "深色主题" : "白色主题" }}
+            </n-tag>
             <n-text depth="3">
               当前界面已切换为更轻、更清楚的卡片化布局，重点信息会更靠前。
             </n-text>
@@ -317,6 +429,23 @@ onMounted(async () => {
   --radius-md: 16px;
 }
 
+:root.dark {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --surface: #1e293b;
+  --surface-soft: #0f172a;
+  --surface-accent: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  --border-soft: #334155;
+  --border-strong: #273549;
+  --text-strong: #f1f5f9;
+  --text-normal: #cbd5e1;
+  --text-soft: #94a3b8;
+  --accent: #22c55e;
+  --accent-soft: rgba(34, 197, 94, 0.12);
+  --shadow-soft: 0 18px 42px rgba(0, 0, 0, 0.45);
+  --shadow-hover: 0 24px 52px rgba(0, 0, 0, 0.55);
+}
+
 html,
 body,
 #app {
@@ -343,6 +472,13 @@ body {
     radial-gradient(circle at top left, rgba(23, 133, 108, 0.08), transparent 28%),
     radial-gradient(circle at 85% 12%, rgba(59, 130, 246, 0.08), transparent 20%),
     linear-gradient(180deg, #f7fafc 0%, #f3f6fb 100%);
+}
+
+:root.dark .app-shell {
+  background:
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.08), transparent 28%),
+    radial-gradient(circle at 85% 12%, rgba(59, 130, 246, 0.08), transparent 20%),
+    linear-gradient(180deg, #0f172a 0%, #0f172a 100%);
 }
 
 .app-shell::before {

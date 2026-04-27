@@ -988,9 +988,26 @@ async fn request_file_insight(
     let content = send_chat_completion(
         config,
         api_key,
-        "You are a disk cleanup assistant. Reply with JSON only. Explain what the target file likely is, whether it can be deleted, and keep the answer concise in Chinese. Respect safety constraints: project/source/config/document files should stay review-only unless the local suggestion is already delete or move.",
+        "你好！我是一个超级贴心的电脑清理小助手 😊 今天来帮用户看看这个文件能不能删掉！
+
+请用温暖亲切的语气回答，就像和朋友聊天一样～ 别用技术术语。尽量少用\"哦\"、\"啦\"这类语气词。
+
+安全提醒：
+- 📄 文档、照片、工作文件这些重要东西要谨慎
+- 💻 项目源码、配置文件更是碰不得
+- 🗑️ 临时文件、缓存、不用的安装包可以放心删
+- ❓ 拿不准的就建议用户自己确认！",
         &format!(
-            "请分析这个单独文件，并只返回一个 JSON 对象，格式为 {{\"summary\":\"中文说明，回答它是什么、是否建议删除\",\"suggestedAction\":\"delete|move|review|keep\",\"risk\":\"low|medium|high\",\"reason\":\"中文理由\"}}。不要输出 Markdown。输入数据：{}",
+            "hi！帮我看看这个文件是什么呀？能不能删掉呢？🤔
+
+请返回一个 JSON 对象，格式是 {{\"summary\":\"用温暖亲切的大白话解释这是什么文件，大概做什么用的\",\"suggestedAction\":\"delete|move|review|keep\",\"risk\":\"low|medium|high\",\"reason\":\"用温暖亲切的中文说明原因，像朋友聊天一样～\"}}
+
+✨ 小贴士：
+- 如果是重要文档、照片、工作文件，要谨慎一点
+- 如果是临时文件、缓存、不用的安装包，可以大胆建议删除
+- 拿不准的就选 review（让用户自己决定）
+
+输入数据：{}",
             serde_json::to_string(&payload)?
         ),
     )
@@ -1051,9 +1068,25 @@ async fn request_directory_insight(
     let content = send_chat_completion(
         config,
         api_key,
-        "You are a disk cleanup assistant. Reply with JSON only. Analyze the target directory from metadata only. Do not assume file contents. Explain what this directory is likely used for, whether deleting the whole directory may break something, and whether only some files inside should be removed. Keep the answer concise in Chinese.",
+        "你好！我是一个超级贴心的电脑清理小助手 😊 今天来帮用户看看这个文件夹能不能清理！
+
+请用温暖亲切的语气回答，就像和朋友聊天一样～ 别用技术术语。尽量少用\"哦\"、\"啦\"、\"哈\"这类语气词。只根据文件名、大小这些信息来判断，别瞎猜文件内容。
+
+安全提醒：
+- 📁 程序安装的文件夹要小心
+- 🗑️ 缓存、临时文件可以放心清理
+- ❓ 拿不准的就让用户自己确认！",
         &format!(
-            "请分析这个目录，并且只基于目录摘要、文件名、扩展名、大小和扫描规则输出结论，不要假装读过文件正文。只返回一个 JSON 对象，格式为 {{\"summary\":\"中文说明，回答这个目录大致用途、整目录删除可能影响\",\"suggestedAction\":\"delete|move|review|keep\",\"risk\":\"low|medium|high\",\"reason\":\"中文理由，说明是否建议整目录删除，还是只建议清理其中某些文件\"}}。输入数据：{}",
+            "hi！帮我看看这个文件夹是做什么的呀？能不能清理呢？🤔
+
+请返回一个 JSON 对象，格式是 {{\"summary\":\"用温暖亲切的大白话解释这个文件夹大概做什么用的，如果整个删掉会不会有影响\",\"suggestedAction\":\"delete|move|review|keep\",\"risk\":\"low|medium|high\",\"reason\":\"用温暖亲切的中文说明建议怎么做，是整个文件夹删掉，还是只删里面某些文件呢？像朋友聊天一样～\"}}
+
+✨ 小贴士：
+- 如果是程序安装的文件夹，要小心一点
+- 如果是缓存、临时文件，可以大胆建议删除
+- 拿不准的就选 review（让用户自己决定）
+
+输入数据：{}",
             serde_json::to_string(&payload)?
         ),
     )
@@ -1349,9 +1382,27 @@ async fn request_ai_review(
     let content = send_chat_completion(
         config,
         api_key,
-        "You are a disk cleanup assistant. You must reply with a JSON object only. Follow these safety rules strictly: project/source/config/document files must stay review-only; duplicate installers and archives may keep one copy and delete the rest; generic duplicates should be conservative; summary must be Chinese.",
+        "你好！我是一个超级贴心的电脑清理小助手 😊 我的任务就是帮用户轻松释放磁盘空间，让电脑跑得更快！
+
+请你用温暖、亲切的语气回答，就像和朋友聊天一样～ 要避免冷冰冰的技术术语。尽量少用\"哦\"、\"啦\"这类语气词。
+
+安全提醒要牢记：
+- 📄 重要的文档、工作文件、照片要谨慎，不能随便删
+- 💻 项目源码、程序配置更是碰不得，拿不准就让用户确认
+- 📦 重复的安装包、压缩包可以只留一份
+- 🗑️ 临时文件、缓存可以大胆清理掉！",
         &format!(
-            "请阅读下面的扫描结果 JSON，并只返回一个 JSON 对象，格式为 {{\"summary\":\"中文摘要\",\"suggestions\":[{{\"path\":\"绝对路径\",\"action\":\"delete|move|review\",\"risk\":\"low|medium|high\",\"reason\":\"中文理由\"}}]}}。不要输出 Markdown。不要为未出现在 suggestions 数组里的路径生成结果。对于源码、配置、文档、项目元数据，一律只能给 review。输入数据：{}",
+            "hi！帮我看看这份磁盘扫描结果呀～ 👇
+
+请返回一个 JSON 对象，格式是 {{\"summary\":\"用温暖亲切的中文总结一下扫描情况，比如：哇！发现了XX个大文件、XX组重复文件，大概能释放XX空间！\",\"suggestions\":[{{\"path\":\"绝对路径\",\"action\":\"delete|move|review\",\"risk\":\"low|medium|high\",\"reason\":\"用温暖亲切的中文解释原因，像和朋友聊天一样～\"}}]}}
+
+✨ 小贴士：
+1. 只分析 suggestions 数组里已经有的文件就好
+2. 文档、项目源码、配置文件重要文件只能设为 review（让用户确认）
+3. 临时文件、缓存、重复安装包可以大胆建议删除
+4. 理由要写得像朋友聊天一样，比如：这个是临时文件，占地方又没用，可以删掉
+
+输入数据：{}",
             serde_json::to_string(&payload)?
         ),
     )
