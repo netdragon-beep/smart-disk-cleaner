@@ -1,15 +1,20 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { ScanReport, OperationLogEntry, AppConfig } from "@/types";
+import type { AiCleanupPlan, AppConfig, OperationLogEntry, ScanReport } from "@/types";
 
 export const useAppStore = defineStore("app", () => {
   const report = ref<ScanReport | null>(null);
+  const aiCleanupPlan = ref<AiCleanupPlan | null>(null);
   const history = ref<OperationLogEntry[]>([]);
   const config = ref<AppConfig | null>(null);
   const theme = ref<"light" | "dark">("light");
 
   function setReport(r: ScanReport | null) {
     report.value = r;
+  }
+
+  function setAiCleanupPlan(plan: AiCleanupPlan | null) {
+    aiCleanupPlan.value = plan;
   }
 
   function addHistory(entries: OperationLogEntry[]) {
@@ -42,10 +47,12 @@ export const useAppStore = defineStore("app", () => {
 
   return {
     report,
+    aiCleanupPlan,
     history,
     config,
     theme,
     setReport,
+    setAiCleanupPlan,
     addHistory,
     setHistory,
     setConfig,

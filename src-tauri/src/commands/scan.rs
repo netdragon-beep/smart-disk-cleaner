@@ -8,8 +8,8 @@ use smart_disk_cleaner_core::config::AppConfig;
 use smart_disk_cleaner_core::dedup::{find_duplicates_with_progress_and_cache, HashCache};
 use smart_disk_cleaner_core::diagnostics::{probe_path, DiagnosticOperation};
 use smart_disk_cleaner_core::models::{
-    AnalysisResult, DedupResult, DuplicateGroup, FileRecord, FileSuggestion, PathDiagnosis,
-    PathIssue, ScanModuleSummary, ScanReport,
+    AnalysisResult, DedupResult, DuplicateGroup, FileRecord, FileSuggestion,
+    GovernanceSuggestion, PathDiagnosis, PathIssue, ScanModuleSummary, ScanReport,
 };
 use smart_disk_cleaner_core::scanner::{scan_directory_with_progress_and_options, ScanOptions};
 use std::collections::{BTreeSet, HashMap};
@@ -51,6 +51,7 @@ pub struct FrontendAdvisorOutput {
     source: String,
     summary: String,
     suggestions: Vec<FileSuggestion>,
+    governance_suggestions: Vec<GovernanceSuggestion>,
     suggestion_count: usize,
     truncated: bool,
 }
@@ -789,6 +790,7 @@ fn summarize_report_for_frontend(
                 .take(FRONTEND_SUGGESTIONS_LIMIT)
                 .cloned()
                 .collect(),
+            governance_suggestions: report.advisor.governance_suggestions.clone(),
             suggestion_count: report.advisor.suggestions.len(),
             truncated: report.advisor.suggestions.len() > FRONTEND_SUGGESTIONS_LIMIT,
         },

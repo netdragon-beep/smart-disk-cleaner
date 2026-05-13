@@ -14,18 +14,24 @@ import type { OperationLogEntry } from "@/types";
 const TEXT = {
   recycle: "\u56DE\u6536",
   move: "\u79FB\u52A8",
+  registry: "\u6CE8\u518C\u8868",
+  migration: "\u8FC1\u79FB",
+  cleanup: "\u6587\u4EF6\u6CBB\u7406",
   time: "\u65F6\u95F4",
   fileName: "\u6587\u4EF6\u540D",
   mode: "\u6A21\u5F0F",
+  category: "\u7C7B\u578B",
   status: "\u72B6\u6001",
   success: "\u6210\u529F",
   failed: "\u5931\u8D25",
   dryRun: "\u6A21\u62DF",
   yes: "\u662F",
   no: "\u5426",
+  reasonLabel: "\u539F\u56E0",
+  rollbackRef: "\u56DE\u6EDA\u5F15\u7528",
   detail: "\u8BE6\u60C5",
-  operationHistory: "\u64CD\u4F5C\u5386\u53F2",
-  noHistory: "\u6682\u65E0\u64CD\u4F5C\u5386\u53F2\u8BB0\u5F55\u3002",
+  operationHistory: "\u6CBB\u7406\u5386\u53F2",
+  noHistory: "\u6682\u65E0\u6CBB\u7406\u5386\u53F2\u8BB0\u5F55\u3002",
 };
 
 const store = useAppStore();
@@ -42,6 +48,13 @@ onMounted(async () => {
 const modeLabels: Record<string, string> = {
   recycle: TEXT.recycle,
   move: TEXT.move,
+};
+
+const categoryLabels: Record<string, string> = {
+  file_cleanup: TEXT.cleanup,
+  migration: TEXT.migration,
+  registry_change: TEXT.registry,
+  registry_rollback: TEXT.registry,
 };
 
 const columns: DataTableColumns<OperationLogEntry> = [
@@ -69,6 +82,17 @@ const columns: DataTableColumns<OperationLogEntry> = [
     render: (row) => h(NTag, { size: "small" }, () => modeLabels[row.mode] || row.mode),
   },
   {
+    title: TEXT.category,
+    key: "recordKind",
+    width: 110,
+    render: (row) =>
+      h(
+        NTag,
+        { size: "small", type: row.recordKind.startsWith("registry") ? "warning" : "info" },
+        () => categoryLabels[row.recordKind] || row.recordKind
+      ),
+  },
+  {
     title: TEXT.status,
     key: "success",
     width: 90,
@@ -92,6 +116,18 @@ const columns: DataTableColumns<OperationLogEntry> = [
     title: TEXT.detail,
     key: "detail",
     ellipsis: { tooltip: true },
+  },
+  {
+    title: TEXT.reasonLabel,
+    key: "reason",
+    ellipsis: { tooltip: true },
+    render: (row) => row.reason || "-",
+  },
+  {
+    title: TEXT.rollbackRef,
+    key: "rollbackReference",
+    ellipsis: { tooltip: true },
+    render: (row) => row.rollbackReference || "-",
   },
 ];
 </script>

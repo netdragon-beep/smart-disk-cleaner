@@ -41,6 +41,7 @@ import type {
   FileSuggestion,
   FileTreeQueryResult,
   FileTreeRow,
+  GovernanceSuggestion,
   ScanModuleKind,
   ScanModuleSummary,
   SuggestedAction,
@@ -210,6 +211,10 @@ const suggestionByPath = computed(() => {
   }
   return map;
 });
+
+const governanceSuggestions = computed<GovernanceSuggestion[]>(() =>
+  report.value?.advisor.governanceSuggestions ?? []
+);
 
 const duplicateGroupCount = computed(
   () => report.value?.dedup.groupCount ?? report.value?.dedup.groups.length ?? 0
@@ -931,6 +936,50 @@ function duplicateTagLabel(path: string): string {
       </div>
     </section>
 
+    <n-card class="surface-card interactive-card">
+      <template #header>
+        <div class="section-head">
+          <div>
+            <div class="section-head__title">治理建议主线</div>
+            <div class="section-head__desc">
+              用统一建议模型解释“为什么能动、为什么不能动、动之前要做什么”。
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <n-empty
+        v-if="governanceSuggestions.length === 0"
+        description="当前扫描结果还没有生成可展示的治理建议。"
+      />
+      <n-grid v-else cols="1 s:2" responsive="screen" :x-gap="12" :y-gap="12">
+        <n-gi v-for="item in governanceSuggestions" :key="item.id">
+          <div class="results-module-card">
+            <div class="results-module-card__top">
+              <div class="results-module-card__title">{{ item.title }}</div>
+              <n-tag :type="item.riskLevel === 'high' ? 'error' : item.riskLevel === 'medium' ? 'warning' : 'success'" size="small">
+                {{ item.riskLevel }}
+              </n-tag>
+            </div>
+            <n-text depth="3">{{ item.summary }}</n-text>
+            <div class="results-module-card__path">{{ item.targetPath }}</div>
+            <div class="results-module-card__tags">
+              <n-tag v-for="tag in item.tags" :key="`${item.id}-${tag}`" size="small" round>
+                {{ tag }}
+              </n-tag>
+              <n-tag size="small" type="info" round>{{ item.action }}</n-tag>
+            </div>
+            <div class="results-module-card__checklist">
+              <div class="results-module-card__check-title">执行前检查</div>
+              <ul>
+                <li v-for="check in item.preCheckItems" :key="check">{{ check }}</li>
+              </ul>
+            </div>
+          </div>
+        </n-gi>
+      </n-grid>
+    </n-card>
+
     <n-alert
       v-if="report.dedupPending"
       type="info"
@@ -1340,6 +1389,12 @@ function duplicateTagLabel(path: string): string {
   overflow: hidden;
 }
 
+:root.dark .results-module-card {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.78);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
 .results-module-card::after {
   content: "";
   position: absolute;
@@ -1355,6 +1410,10 @@ function duplicateTagLabel(path: string): string {
   display: block;
   margin: 10px 0 12px;
   line-height: 1.7;
+}
+
+:root.dark .results-module-card__desc {
+  color: #cbd5e1;
 }
 
 .results-duplicate-grid {

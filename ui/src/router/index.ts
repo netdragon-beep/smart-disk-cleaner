@@ -14,6 +14,11 @@ const router = createRouter({
       component: () => import("@/views/ResultsWorkbenchView.vue"),
     },
     {
+      path: "/ai-cleanup",
+      name: "ai-cleanup",
+      component: () => import("@/views/AiCleanupView.vue"),
+    },
+    {
       path: "/cleanup",
       name: "cleanup",
       component: () => import("@/views/CleanupView.vue"),
@@ -32,6 +37,11 @@ const router = createRouter({
       path: "/processes",
       name: "processes",
       component: () => import("@/views/ProcessesMonitorChartsView.vue"),
+    },
+    {
+      path: "/registry",
+      name: "registry",
+      component: () => import("@/views/RegistryView.vue"),
     },
     {
       path: "/settings",

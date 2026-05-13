@@ -1,5 +1,8 @@
 use crate::diagnostics::{diagnose_io_error, DiagnosticOperation};
-use crate::models::{ExecutionMode, OperationLogEntry, PathDiagnosis, ScanReport, SuggestedAction};
+use crate::models::{
+    ExecutionMode, OperationLogEntry, OperationRecordKind, PathDiagnosis, ScanReport,
+    SuggestedAction,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use std::fs;
@@ -36,6 +39,9 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
                 dry_run: options.dry_run,
                 success: false,
                 detail: "该路径不在建议清单中，已拒绝执行。".to_string(),
+                record_kind: OperationRecordKind::FileCleanup,
+                reason: Some("路径不在治理建议列表中".to_string()),
+                rollback_reference: None,
                 diagnosis: None,
             });
             continue;
@@ -53,6 +59,9 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
                 success: false,
                 detail: "该文件被标记为“保留”或“待审”，系统已禁止直接清理，请先人工确认。"
                     .to_string(),
+                record_kind: OperationRecordKind::FileCleanup,
+                reason: Some("建议动作为保留或待审，拒绝直接执行".to_string()),
+                rollback_reference: None,
                 diagnosis: None,
             });
             continue;
@@ -71,6 +80,9 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
                 dry_run: options.dry_run,
                 success: true,
                 detail,
+                record_kind: OperationRecordKind::FileCleanup,
+                reason: Some("根据治理建议执行文件清理".to_string()),
+                rollback_reference: None,
                 diagnosis: None,
             }),
             Err(err) => logs.push(OperationLogEntry {
@@ -80,6 +92,9 @@ pub fn execute_from_report(options: &ExecuteOptions) -> Result<Vec<OperationLogE
                 dry_run: options.dry_run,
                 success: false,
                 detail: err.detail,
+                record_kind: OperationRecordKind::FileCleanup,
+                reason: Some("执行文件清理失败".to_string()),
+                rollback_reference: None,
                 diagnosis: Some(err.diagnosis),
             }),
         }
@@ -113,6 +128,9 @@ pub fn execute_direct_move_with_options(
                 dry_run,
                 success: false,
                 detail: "该路径不属于迁移助手允许的一键迁移范围，已拒绝执行。".to_string(),
+                record_kind: OperationRecordKind::Migration,
+                reason: Some("路径不属于一键迁移允许范围".to_string()),
+                rollback_reference: None,
                 diagnosis: None,
             });
             continue;
@@ -126,6 +144,9 @@ pub fn execute_direct_move_with_options(
                 dry_run,
                 success: true,
                 detail,
+                record_kind: OperationRecordKind::Migration,
+                reason: Some("执行直接迁移".to_string()),
+                rollback_reference: None,
                 diagnosis: None,
             }),
             Err(err) => logs.push(OperationLogEntry {
@@ -135,6 +156,9 @@ pub fn execute_direct_move_with_options(
                 dry_run,
                 success: false,
                 detail: err.detail,
+                record_kind: OperationRecordKind::Migration,
+                reason: Some("直接迁移失败".to_string()),
+                rollback_reference: None,
                 diagnosis: Some(err.diagnosis),
             }),
         }

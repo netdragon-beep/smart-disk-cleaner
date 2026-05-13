@@ -96,6 +96,43 @@ export interface FileSuggestion {
   reason: string;
 }
 
+export type GovernanceTargetKind =
+  | "file"
+  | "directory"
+  | "app_data"
+  | "app_installation"
+  | "registry_entry";
+
+export type GovernanceScenarioKind =
+  | "wechat_data"
+  | "download_archive"
+  | "cloud_sync"
+  | "large_app"
+  | "duplicate_file"
+  | "temporary_file"
+  | "empty_file"
+  | "empty_directory"
+  | "registry_startup"
+  | "registry_path_reference"
+  | "unknown";
+
+export interface GovernanceSuggestion {
+  id: string;
+  targetKind: GovernanceTargetKind;
+  targetPath: string;
+  scenarioKind: GovernanceScenarioKind;
+  title: string;
+  action: SuggestedAction;
+  riskLevel: RiskLevel;
+  summary: string;
+  reason: string;
+  tags: string[];
+  preCheckItems: string[];
+  postCheckItems: string[];
+  dryRunSupported: boolean;
+  rollbackSupported: boolean;
+}
+
 export interface MigrationActionStep {
   title: string;
   detail: string;
@@ -221,6 +258,7 @@ export interface AdvisorOutput {
   source: string;
   summary: string;
   suggestions: FileSuggestion[];
+  governanceSuggestions: GovernanceSuggestion[];
   suggestionCount?: number;
   truncated?: boolean;
 }
@@ -352,6 +390,23 @@ export interface AppOverviewRow {
   samplePaths: string[];
 }
 
+export interface AiCleanupAppCandidate {
+  key: string;
+  appName: string;
+  publisher: string | null;
+  installLocation: string | null;
+  estimatedSize: number;
+  reason: string;
+  uninstallAvailable: boolean;
+}
+
+export interface AiCleanupPlan {
+  source: string;
+  summary: string;
+  fileSuggestions: FileSuggestion[];
+  uninstallCandidates: AiCleanupAppCandidate[];
+}
+
 export interface FileTreeQueryResult {
   matchedCount: number;
   nodeCount: number;
@@ -360,6 +415,7 @@ export interface FileTreeQueryResult {
 }
 
 export type ExecutionMode = "recycle" | "move";
+export type OperationRecordKind = "file_cleanup" | "migration" | "registry_change" | "registry_rollback";
 
 export type DiagnosticSeverity = "info" | "warning" | "critical";
 export type DiagnosticCode =
@@ -395,6 +451,9 @@ export interface OperationLogEntry {
   dryRun: boolean;
   success: boolean;
   detail: string;
+  recordKind: OperationRecordKind;
+  reason: string | null;
+  rollbackReference: string | null;
   diagnosis: PathDiagnosis | null;
 }
 
@@ -415,6 +474,63 @@ export interface AppConfig {
   strictFileAiRemoteOnly: boolean;
   excludePatterns: string[];
   theme: string;
+}
+
+export type RegistryEntryKind = "startup" | "uninstall" | "path_reference";
+export type RegistryRootKey = "hkcu" | "hklm";
+export type RegistryValueDataKind = "string" | "expand_string" | "unknown";
+export type RegistryIssueKind = "missing_target" | "missing_quoted_path" | "startup_entry_enabled";
+
+export interface RegistryEntryRecord {
+  id: string;
+  rootKey: RegistryRootKey;
+  subKey: string;
+  valueName: string;
+  valueKind: RegistryValueDataKind;
+  valueData: string;
+  entryKind: RegistryEntryKind;
+  displayName: string;
+  targetPath: string | null;
+  existsOnDisk: boolean;
+  safeToModify: boolean;
+  riskLevel: RiskLevel;
+  tags: string[];
+}
+
+export interface RegistryIssue {
+  id: string;
+  entryId: string;
+  issueKind: RegistryIssueKind;
+  title: string;
+  summary: string;
+  riskLevel: RiskLevel;
+  suggestedAction: SuggestedAction;
+  preCheckItems: string[];
+  postCheckItems: string[];
+}
+
+export interface RegistryBackup {
+  backupId: string;
+  entry: RegistryEntryRecord;
+  originalValueData: string;
+  createdAt: string;
+}
+
+export interface RegistryChangePreview {
+  entry: RegistryEntryRecord;
+  riskLevel: RiskLevel;
+  backupId: string | null;
+  dryRunSupported: boolean;
+  rollbackSupported: boolean;
+  beforeValue: string;
+  afterValue: string;
+  postCheckItems: string[];
+}
+
+export interface RegistryRollbackRecord {
+  backupId: string;
+  restoredAt: string;
+  entry: RegistryEntryRecord;
 }
 
 // Progress event types

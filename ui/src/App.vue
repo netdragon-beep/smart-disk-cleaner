@@ -11,72 +11,84 @@ import {
   NMenu,
   NMessageProvider,
   NSpace,
+  NSwitch,
   NTag,
   NText,
   NTooltip,
-  dateZhCN,
-  zhCN,
   darkTheme,
+  dateZhCN,
   type GlobalThemeOverrides,
   type MenuOption,
+  zhCN,
 } from "naive-ui";
 import { useConfig } from "@/composables/useConfig";
 import { useAppStore } from "@/stores/app";
+import type { AppConfig } from "@/types";
 
 const router = useRouter();
 const route = useRoute();
 const store = useAppStore();
-const { loadConfig } = useConfig();
+const { loadConfig, saveConfig } = useConfig();
 
-const appTitle = "智能磁盘整理助手";
+const appTitle = "本地存储治理助手";
 const renderEpoch = ref(0);
 const routeError = ref("");
+const themeSwitchLoading = ref(false);
+
+const currentRouteName = computed(() => (route.name as string) || "scan");
+const activeKey = computed(() => currentRouteName.value);
+const viewKey = computed(() => `${route.fullPath}:${renderEpoch.value}`);
+const isDark = computed(() => store.theme === "dark");
 
 const pageMeta: Record<string, { title: string; subtitle: string; badge: string }> = {
   scan: {
-    title: "磁盘扫描",
-    subtitle: "从目录选择、扫描进度到结果进入，保持流程清晰可感知。",
-    badge: "入口页",
-  },
-  migration: {
-    title: "迁移助手",
-    subtitle: "把可迁移对象、计划动作、失败重试和回滚路径组织成一套连续操作。",
-    badge: "AI 辅助",
-  },
-  processes: {
-    title: "进程诊断",
-    subtitle: "把资源占用、风险判断和结束建议放在同一个工作台里。",
-    badge: "系统状态",
+    title: "空间发现",
+    subtitle: "从目录扫描开始识别大文件、应用数据和典型占用场景。",
+    badge: "Discover",
   },
   results: {
-    title: "扫描结果",
-    subtitle: "从应用、目录、文件和建议四个层级查看空间问题。",
-    badge: "分析中心",
+    title: "风险解释",
+    subtitle: "按治理建议、应用概览和目录结构理解空间问题，而不是直接删除文件。",
+    badge: "Explain",
   },
   cleanup: {
-    title: "执行清理",
-    subtitle: "先筛选，再执行；遇到占用冲突时直接定位并处理。",
-    badge: "执行页",
+    title: "安全执行",
+    subtitle: "将治理建议转成 dry-run 或真实操作，保留执行结果和占用诊断。",
+    badge: "Act",
+  },
+  migration: {
+    title: "安全迁移",
+    subtitle: "围绕应用数据、大文件和下载归档生成结构化迁移计划与回滚链路。",
+    badge: "Migrate",
+  },
+  registry: {
+    title: "注册表治理",
+    subtitle: "只处理可解释、可备份、可预览、可回滚的启动项与路径引用问题。",
+    badge: "Registry",
+  },
+  processes: {
+    title: "占用诊断",
+    subtitle: "查看阻塞治理动作的高占用进程，并给出风险提示与处理建议。",
+    badge: "Process",
   },
   history: {
-    title: "历史记录",
-    subtitle: "回看过去的清理与迁移动作，便于复盘和继续处理。",
-    badge: "审计",
+    title: "治理历史",
+    subtitle: "统一复核文件治理、迁移和注册表修改记录，保留回滚入口。",
+    badge: "History",
   },
   settings: {
     title: "偏好设置",
-    subtitle: "统一管理阈值、排除规则和 AI 配置。",
-    badge: "配置",
+    subtitle: "管理阈值、排除规则和 AI 配置，保持治理策略一致。",
+    badge: "Config",
+  },
+  "ai-cleanup": {
+    title: "AI 治理摘要",
+    subtitle: "用 AI 辅助解释候选治理对象，但不绕过本地规则和人工确认。",
+    badge: "AI",
   },
 };
 
-const currentPage = computed(
-  () => pageMeta[(route.name as string) || "scan"] ?? pageMeta.scan
-);
-const viewKey = computed(() => `${route.fullPath}:${renderEpoch.value}`);
-const activeKey = computed(() => (route.name as string) || "scan");
-
-const isDark = computed(() => store.theme === "dark");
+const currentPage = computed(() => pageMeta[currentRouteName.value] ?? pageMeta.scan);
 
 const lightThemeOverrides: GlobalThemeOverrides = {
   common: {
@@ -106,61 +118,6 @@ const lightThemeOverrides: GlobalThemeOverrides = {
     contentColor: "#f4f7fb",
     headerColor: "#f4f7fb",
     siderBorderColor: "#edf1f7",
-  },
-  Card: {
-    color: "#ffffff",
-    colorEmbedded: "#f7f9fc",
-    borderColor: "#e6ebf3",
-    borderRadius: "22px",
-    boxShadow: "0 18px 42px rgba(15, 23, 42, 0.06)",
-    titleTextColor: "#142033",
-    textColor: "#516079",
-  },
-  DataTable: {
-    thColor: "#f7f9fc",
-    thColorHover: "#f0f4fa",
-    tdColor: "#ffffff",
-    tdColorHover: "#f8fbff",
-    borderColor: "#e9eef5",
-  },
-  Input: {
-    borderHover: "#b8d9cf",
-    borderFocus: "#17856c",
-    color: "#ffffff",
-    boxShadowFocus: "0 0 0 3px rgba(23, 133, 108, 0.14)",
-  },
-  Select: {
-    peers: {
-      InternalSelection: {
-        borderHover: "#b8d9cf",
-        borderFocus: "#17856c",
-        boxShadowFocus: "0 0 0 3px rgba(23, 133, 108, 0.14)",
-      },
-    },
-  },
-  Button: {
-    borderRadiusMedium: "14px",
-    borderRadiusSmall: "12px",
-    fontWeight: "600",
-  },
-  Menu: {
-    itemTextColorActive: "#17856c",
-    itemTextColorHover: "#142033",
-    itemTextColorActiveHover: "#17856c",
-    itemTextColorChildActive: "#17856c",
-    itemColorHover: "#f2f8f6",
-    itemColorActive: "#ecf7f3",
-    itemColorActiveHover: "#ecf7f3",
-    arrowColorActive: "#17856c",
-  },
-  Tag: {
-    borderRadius: "999px",
-  },
-  Alert: {
-    borderRadius: "18px",
-  },
-  Modal: {
-    borderRadius: "24px",
   },
 };
 
@@ -193,61 +150,6 @@ const darkThemeOverrides: GlobalThemeOverrides = {
     headerColor: "#0f172a",
     siderBorderColor: "#334155",
   },
-  Card: {
-    color: "#1e293b",
-    colorEmbedded: "#0f172a",
-    borderColor: "#334155",
-    borderRadius: "22px",
-    boxShadow: "0 18px 42px rgba(0, 0, 0, 0.45)",
-    titleTextColor: "#f1f5f9",
-    textColor: "#cbd5e1",
-  },
-  DataTable: {
-    thColor: "#0f172a",
-    thColorHover: "#1e293b",
-    tdColor: "#1e293b",
-    tdColorHover: "#334155",
-    borderColor: "#273549",
-  },
-  Input: {
-    borderHover: "#22c55e",
-    borderFocus: "#22c55e",
-    color: "#1e293b",
-    boxShadowFocus: "0 0 0 3px rgba(34, 197, 94, 0.14)",
-  },
-  Select: {
-    peers: {
-      InternalSelection: {
-        borderHover: "#22c55e",
-        borderFocus: "#22c55e",
-        boxShadowFocus: "0 0 0 3px rgba(34, 197, 94, 0.14)",
-      },
-    },
-  },
-  Button: {
-    borderRadiusMedium: "14px",
-    borderRadiusSmall: "12px",
-    fontWeight: "600",
-  },
-  Menu: {
-    itemTextColorActive: "#22c55e",
-    itemTextColorHover: "#f1f5f9",
-    itemTextColorActiveHover: "#22c55e",
-    itemTextColorChildActive: "#22c55e",
-    itemColorHover: "#334155",
-    itemColorActive: "#1e293b",
-    itemColorActiveHover: "#1e293b",
-    arrowColorActive: "#22c55e",
-  },
-  Tag: {
-    borderRadius: "999px",
-  },
-  Alert: {
-    borderRadius: "18px",
-  },
-  Modal: {
-    borderRadius: "24px",
-  },
 };
 
 const themeOverrides = computed(() =>
@@ -261,7 +163,7 @@ function buildMenuOption(label: string, key: string, description: string): MenuO
       h(
         NTooltip,
         {
-          delay: 400,
+          delay: 300,
           placement: "right",
           style: "max-width: 260px;",
         },
@@ -282,13 +184,14 @@ function buildMenuOption(label: string, key: string, description: string): MenuO
 }
 
 const menuOptions: MenuOption[] = [
-  buildMenuOption("磁盘扫描", "scan", "选择磁盘或目录，开始空间分析。"),
-  buildMenuOption("迁移助手", "migration", "识别可迁移内容并生成分步计划。"),
-  buildMenuOption("进程诊断", "processes", "查看高占用进程并判断是否可以结束。"),
-  buildMenuOption("扫描结果", "results", "从应用、文件和建议多个视角复核结果。"),
-  buildMenuOption("执行清理", "cleanup", "批量执行清理，处理被占用文件。"),
-  buildMenuOption("操作历史", "history", "查看过去执行记录和回滚结果。"),
-  buildMenuOption("偏好设置", "settings", "调整阈值、排除规则和 AI 参数。"),
+  buildMenuOption("空间发现", "scan", "选择磁盘或目录，启动空间扫描与场景识别。"),
+  buildMenuOption("风险解释", "results", "用统一治理建议模型解释扫描结果和处理边界。"),
+  buildMenuOption("安全执行", "cleanup", "将建议转成 dry-run 或真实执行，并保留诊断信息。"),
+  buildMenuOption("安全迁移", "migration", "为应用数据和大文件生成结构化迁移计划。"),
+  buildMenuOption("注册表治理", "registry", "只读分析、备份、预览、单次修改与回滚。"),
+  buildMenuOption("占用诊断", "processes", "查看阻塞文件治理的进程并提供风险说明。"),
+  buildMenuOption("治理历史", "history", "统一查看文件治理、迁移和注册表操作历史。"),
+  buildMenuOption("偏好设置", "settings", "维护阈值、排除规则和 AI 配置。"),
 ];
 
 function handleMenuUpdate(key: string) {
@@ -298,6 +201,25 @@ function handleMenuUpdate(key: string) {
 function reloadCurrentView() {
   routeError.value = "";
   renderEpoch.value += 1;
+}
+
+async function handleThemeToggle(value: boolean) {
+  const nextTheme = value ? "dark" : "light";
+  const nextConfig: AppConfig = {
+    largeFileThresholdMb: store.config?.largeFileThresholdMb ?? 512,
+    maxAiItems: store.config?.maxAiItems ?? 20,
+    apiKey: store.config?.apiKey ?? null,
+    aiBaseUrl: store.config?.aiBaseUrl ?? "https://api.openai.com",
+    aiModel: store.config?.aiModel ?? "gpt-4.1-mini",
+    strictFileAiRemoteOnly: store.config?.strictFileAiRemoteOnly ?? false,
+    excludePatterns: store.config?.excludePatterns ?? [],
+    theme: nextTheme,
+  };
+
+  store.setConfig(nextConfig);
+  themeSwitchLoading.value = true;
+  await saveConfig(nextConfig);
+  themeSwitchLoading.value = false;
 }
 
 watch(
@@ -354,17 +276,17 @@ onMounted(async () => {
             <div class="brand-copy">
               <div class="brand-title">{{ appTitle }}</div>
               <n-text depth="3" class="brand-subtitle">
-                扫描、清理、迁移一体化工作台
+                面向 Windows 重度用户的可解释存储治理台
               </n-text>
             </div>
           </div>
 
           <div class="sider-note">
             <n-tag size="small" type="success" round>
-              {{ isDark ? "深色主题" : "白色主题" }}
+              {{ isDark ? "深色主题" : "浅色主题" }}
             </n-tag>
             <n-text depth="3">
-              当前界面已切换为更轻、更清楚的卡片化布局，重点信息会更靠前。
+              以空间发现、风险解释、安全执行三条主线组织功能，避免把产品做成模糊的系统优化工具。
             </n-text>
           </div>
 
@@ -380,12 +302,27 @@ onMounted(async () => {
           <n-layout-content content-style="height: 100%;">
             <div class="app-topbar">
               <div>
-                <div class="topbar-kicker">Smart Disk Studio</div>
+                <div class="topbar-kicker">Storage Governance Studio</div>
                 <div class="topbar-title">{{ currentPage.title }}</div>
                 <n-text depth="3">{{ currentPage.subtitle }}</n-text>
               </div>
               <div class="topbar-meta">
-                <n-tag round size="medium" type="success">White Editorial UI</n-tag>
+                <div class="theme-toggle-card">
+                  <div class="theme-toggle-card__copy">
+                    <div class="theme-toggle-card__label">主题切换</div>
+                    <div class="theme-toggle-card__value">
+                      {{ isDark ? "深色模式" : "浅色模式" }}
+                    </div>
+                  </div>
+                  <n-switch
+                    :value="isDark"
+                    :loading="themeSwitchLoading"
+                    @update:value="handleThemeToggle"
+                  />
+                </div>
+                <n-tag round size="medium" type="success">
+                  {{ isDark ? "Dark Editorial UI" : "Light Editorial UI" }}
+                </n-tag>
                 <n-tag round size="medium" type="info">{{ currentPage.badge }}</n-tag>
               </div>
             </div>
@@ -414,19 +351,15 @@ onMounted(async () => {
   --app-bg: #f4f7fb;
   --surface: #ffffff;
   --surface-soft: #f7f9fc;
-  --surface-accent: linear-gradient(135deg, #ffffff 0%, #f7fbfa 100%);
   --border-soft: #e6ebf3;
-  --border-strong: #dbe4ef;
   --text-strong: #142033;
   --text-normal: #516079;
   --text-soft: #7b879b;
   --accent: #17856c;
-  --accent-soft: rgba(23, 133, 108, 0.12);
   --shadow-soft: 0 18px 42px rgba(15, 23, 42, 0.06);
   --shadow-hover: 0 24px 52px rgba(15, 23, 42, 0.1);
   --radius-xl: 24px;
   --radius-lg: 20px;
-  --radius-md: 16px;
 }
 
 :root.dark {
@@ -434,14 +367,11 @@ onMounted(async () => {
   --app-bg: #0f172a;
   --surface: #1e293b;
   --surface-soft: #0f172a;
-  --surface-accent: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
   --border-soft: #334155;
-  --border-strong: #273549;
   --text-strong: #f1f5f9;
   --text-normal: #cbd5e1;
   --text-soft: #94a3b8;
   --accent: #22c55e;
-  --accent-soft: rgba(34, 197, 94, 0.12);
   --shadow-soft: 0 18px 42px rgba(0, 0, 0, 0.45);
   --shadow-hover: 0 24px 52px rgba(0, 0, 0, 0.55);
 }
@@ -498,7 +428,6 @@ body {
 }
 
 .brand-panel {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -517,10 +446,6 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   box-shadow: 0 16px 30px rgba(23, 133, 108, 0.24);
-}
-
-.brand-copy {
-  min-width: 0;
 }
 
 .brand-title {
@@ -548,6 +473,12 @@ body {
     linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(247, 251, 250, 0.96) 100%);
   border: 1px solid rgba(23, 133, 108, 0.12);
   box-shadow: 0 14px 28px rgba(23, 133, 108, 0.08);
+}
+
+:root.dark .sider-note {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.94) 0%, rgba(15, 23, 42, 0.94) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.7);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.32);
 }
 
 .app-menu {
@@ -594,6 +525,42 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+  align-items: center;
+}
+
+.theme-toggle-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-soft);
+  backdrop-filter: blur(10px);
+}
+
+:root.dark .theme-toggle-card {
+  background: rgba(30, 41, 59, 0.86);
+}
+
+.theme-toggle-card__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.theme-toggle-card__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.theme-toggle-card__value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-strong);
 }
 
 .view-scroll {
@@ -613,7 +580,6 @@ body {
 }
 
 .page-hero {
-  position: relative;
   padding: 28px;
   border-radius: var(--radius-xl);
   background:
@@ -622,20 +588,14 @@ body {
     linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
   border: 1px solid var(--border-soft);
   box-shadow: var(--shadow-soft);
-  overflow: hidden;
 }
 
-.page-hero::after {
-  content: "";
-  position: absolute;
-  right: -50px;
-  top: -40px;
-  width: 240px;
-  height: 240px;
-  border-radius: 999px;
+:root.dark .page-hero {
   background:
-    radial-gradient(circle, rgba(23, 133, 108, 0.12) 0%, rgba(23, 133, 108, 0) 68%);
-  pointer-events: none;
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 24%),
+    radial-gradient(circle at 8% 18%, rgba(34, 197, 94, 0.12), transparent 18%),
+    linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.72);
 }
 
 .page-hero__title {
@@ -656,60 +616,21 @@ body {
   color: var(--text-normal);
 }
 
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
-}
-
-.metric-card {
-  position: relative;
-  padding: 18px 18px 16px;
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  border: 1px solid var(--border-soft);
-  box-shadow: var(--shadow-soft);
-  overflow: hidden;
-}
-
-.metric-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(90deg, rgba(23, 133, 108, 0.9), rgba(59, 130, 246, 0.5));
-}
-
-.metric-card__label {
-  font-size: 13px;
-  color: var(--text-soft);
-}
-
-.metric-card__value {
-  margin-top: 10px;
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--text-strong);
-}
-
-.metric-card__hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--text-soft);
-}
-
 .surface-card {
   border-radius: var(--radius-xl);
   overflow: hidden;
 }
 
-.soft-panel {
-  padding: 16px;
-  border-radius: var(--radius-lg);
-  background: var(--surface-soft);
-  border: 1px solid var(--border-soft);
+.interactive-card {
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    border-color 0.22s ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
 }
 
 .section-head {
@@ -732,16 +653,31 @@ body {
   line-height: 1.7;
 }
 
-.interactive-card {
-  transition:
-    transform 0.22s ease,
-    box-shadow 0.22s ease,
-    border-color 0.22s ease;
+.metric-card {
+  position: relative;
+  padding: 18px 18px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-soft);
 }
 
-.interactive-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-hover);
+.metric-card__label {
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.metric-card__value {
+  margin-top: 10px;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-strong);
+}
+
+.metric-card__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-soft);
 }
 
 .filter-bar {
@@ -755,16 +691,9 @@ body {
   backdrop-filter: blur(12px);
 }
 
-.scroll-area::-webkit-scrollbar,
-.view-scroll::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.scroll-area::-webkit-scrollbar-thumb,
-.view-scroll::-webkit-scrollbar-thumb {
-  background: #d4dce8;
-  border-radius: 999px;
+:root.dark .filter-bar {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(51, 65, 85, 0.92);
 }
 
 @keyframes page-enter {

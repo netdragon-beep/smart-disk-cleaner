@@ -1,9 +1,12 @@
 /target
+/target-codex*
 /target-local*
 /node_modules
 /.idea
 /.vscode
 scan-report.json
 operations-log.json
+tauri-dev.log
+vite-dev.log
 ui/node_modules
 ui/dist

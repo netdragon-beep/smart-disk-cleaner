@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Scenario suggestion
+    url: https://github.com/example/smart-disk-cleaner/discussions
+    about: Suggest a new Windows storage governance scenario to support.

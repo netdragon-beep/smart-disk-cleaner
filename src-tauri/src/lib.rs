@@ -12,6 +12,8 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::ai::explain_file_with_ai,
+            commands::ai::generate_ai_cleanup_plan,
+            commands::ai::open_apps_and_features,
             commands::process::list_top_processes,
             commands::process::get_process_monitor_snapshot,
             commands::process::explain_process_with_ai,
@@ -37,6 +39,12 @@ pub fn run() {
             commands::migration::execute_migration_plan,
             commands::migration::get_migration_run_history,
             commands::migration::rollback_migration_run,
+            commands::registry::list_registry_startup_entries,
+            commands::registry::list_registry_path_issues,
+            commands::registry::export_registry_backup,
+            commands::registry::preview_registry_change,
+            commands::registry::apply_registry_change,
+            commands::registry::rollback_registry_change,
             commands::config::load_config,
             commands::config::save_config,
             commands::config::list_ai_models,

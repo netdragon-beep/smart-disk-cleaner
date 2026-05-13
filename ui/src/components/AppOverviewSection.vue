@@ -236,11 +236,26 @@ function toggleExpanded(item: AppOverviewRow) {
   cursor: pointer;
 }
 
+.dark .app-overview-card,
+:root.dark .app-overview-card {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.78);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.3);
+}
+
 .app-overview-card--selected {
   border-color: rgba(23, 133, 108, 0.42);
   box-shadow:
     0 18px 40px rgba(23, 133, 108, 0.12),
     inset 0 0 0 1px rgba(23, 133, 108, 0.18);
+}
+
+.dark .app-overview-card--selected,
+:root.dark .app-overview-card--selected {
+  border-color: rgba(34, 197, 94, 0.55);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 1px rgba(34, 197, 94, 0.28);
 }
 
 .app-overview-card__top {
@@ -265,6 +280,12 @@ function toggleExpanded(item: AppOverviewRow) {
   object-fit: cover;
   background: #fff;
   border: 1px solid var(--border-soft);
+}
+
+.dark .app-overview-card__icon,
+:root.dark .app-overview-card__icon {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(71, 85, 105, 0.78);
 }
 
 .app-overview-card__meta {
@@ -306,6 +327,12 @@ function toggleExpanded(item: AppOverviewRow) {
   gap: 12px;
 }
 
+.dark .app-overview-card__body,
+:root.dark .app-overview-card__body {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(51, 65, 85, 0.95);
+}
+
 .app-overview-card__field {
   display: flex;
   flex-direction: column;
@@ -331,5 +358,10 @@ function toggleExpanded(item: AppOverviewRow) {
 .app-overview-card__footer {
   display: flex;
   justify-content: flex-end;
+}
+
+.dark .app-overview-card__footer :deep(.n-button),
+:root.dark .app-overview-card__footer :deep(.n-button) {
+  color: #cbd5e1;
 }
 </style>

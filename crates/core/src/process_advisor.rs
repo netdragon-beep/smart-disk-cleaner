@@ -370,19 +370,18 @@ fn local_risk_and_action(process: &ProcessRecord) -> (RiskLevel, ProcessSuggeste
 }
 
 fn local_summary(
-    process: &ProcessRecord,
-    risk: RiskLevel,
+    _process: &ProcessRecord,
+    _risk: RiskLevel,
     suggested_action: ProcessSuggestedAction,
 ) -> String {
-    let category_label = category_label(&process.category);
-    let pressure = resource_pressure_text(process);
     let action_label = process_action_label(suggested_action);
-    let risk_label = risk_label(risk);
-
-    format!(
-        "{}（PID {}）当前属于{}，{}。本地规则判断风险{}，建议{}。",
-        process.name, process.pid, category_label, pressure, risk_label, action_label
-    )
+    let impact = match suggested_action {
+        ProcessSuggestedAction::AvoidEnd => "结束后可能影响系统或安全保护。",
+        ProcessSuggestedAction::EndAfterSave => "结束前最好先保存正在做的事情。",
+        ProcessSuggestedAction::Review => "现在还不能直接下结论，最好先确认它在做什么。",
+        ProcessSuggestedAction::SafeToEnd => "一般可以尝试结束，通常不会有大影响。",
+    };
+    format!("对普通用户的建议：{}。{}", action_label, impact)
 }
 
 fn local_reason(
@@ -396,7 +395,7 @@ fn local_reason(
     let runtime_text = format_runtime(process.run_time_seconds);
 
     let base = format!(
-        "进程分类：{}；CPU：{}；内存：{}；本次采样磁盘读写：{}；已运行约{}。",
+        "它现在大概属于“{}”这一类。当前 CPU 约 {}，内存约 {}，磁盘读写约 {}，已运行约 {}。",
         category_label(&process.category),
         cpu_text,
         memory_text,
@@ -420,9 +419,9 @@ fn local_reason(
     };
 
     let risk_note = match risk {
-        RiskLevel::High => "高风险的意思是结束后可能影响系统稳定性、登录状态或安全防护。",
-        RiskLevel::Medium => "中风险表示更适合人工确认后再操作。",
-        RiskLevel::Low => "低风险表示通常只会中断临时后台任务，影响相对可控。",
+        RiskLevel::High => "这属于高风险，结束后可能让系统、登录状态或安全保护出问题。",
+        RiskLevel::Medium => "这属于中风险，最好先确认用途再动。",
+        RiskLevel::Low => "这属于低风险，一般只会中断临时后台任务。",
     };
 
     format!("{base}{advice}{risk_note}")
@@ -540,9 +539,9 @@ async fn request_remote_process_insight(
     let content = send_chat_completion(
         config,
         api_key,
-        "You are a Windows process diagnosis assistant. Reply with a JSON object only. Be conservative. Never recommend ending critical system or security processes. Explain in concise Chinese.",
+        "You are a Windows process diagnosis assistant for ordinary computer users. Reply with a JSON object only. Be conservative. Never recommend ending critical system or security processes. Use plain Chinese, avoid jargon, and make the first sentence directly answer whether the user should end this process now.",
         &format!(
-            "请根据下面的 Windows 进程摘要，只返回一个 JSON 对象，格式为 {{\"summary\":\"中文结论\",\"suggested_action\":\"safe_to_end|end_after_save|review|avoid_end\",\"risk\":\"low|medium|high\",\"reason\":\"中文说明\"}}。不要输出 Markdown。不要假装知道进程内部业务，只能基于进程名、路径、命令行、资源占用和本地规则做保守判断。输入：{}",
+            "请根据下面的 Windows 进程摘要，只返回一个 JSON 对象，格式为 {{\"summary\":\"第一句必须直接告诉普通用户现在能不能结束这个进程，例如可以结束/先不要结束/先保存再结束\",\"suggested_action\":\"safe_to_end|end_after_save|review|avoid_end\",\"risk\":\"low|medium|high\",\"reason\":\"用人话说明为什么、结束后可能有什么影响、用户现在该怎么做；不要写技术术语小作文\"}}。不要输出 Markdown。不要假装知道进程内部业务，只能基于进程名、路径、命令行、资源占用和本地规则做保守判断。输入：{}",
             serde_json::to_string(&payload)?
         ),
     )
@@ -617,9 +616,9 @@ async fn request_remote_process_follow_up(
     let content = send_chat_completion(
         config,
         api_key,
-        "You are a Windows process diagnosis assistant. Answer in concise Chinese. Be conservative. Never claim certainty you do not have. Never recommend ending critical system or security processes.",
+        "You are a Windows process diagnosis assistant for ordinary computer users. Answer in concise plain Chinese. Be conservative. Never claim certainty you do not have. Never recommend ending critical system or security processes. Always answer in everyday language.",
         &format!(
-            "请根据下面的 Windows 进程信息和已有诊断结果，回答用户的追问。只输出一个 JSON 对象，格式为 {{\"answer\":\"中文回答\"}}。不要输出 Markdown。不要假装知道进程内部业务，只能基于进程名、路径、命令行、资源占用和已有诊断做保守判断。输入：{}",
+            "请根据下面的 Windows 进程信息和已有诊断结果，回答用户的追问。只输出一个 JSON 对象，格式为 {{\"answer\":\"用普通人听得懂的话回答，先说结论，再说影响和建议\"}}。不要输出 Markdown。不要假装知道进程内部业务，只能基于进程名、路径、命令行、资源占用和已有诊断做保守判断。输入：{}",
             serde_json::to_string(&payload)?
         ),
     )

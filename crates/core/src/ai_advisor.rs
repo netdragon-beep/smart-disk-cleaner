@@ -1,6 +1,7 @@
 use crate::models::{
     AdvisorOutput, AiInsightTargetKind, AnalysisResult, DedupResult, FileAiInsight, FileRecord,
-    FileSuggestion, RiskLevel, ScanReport, ScanResult, SuggestedAction,
+    FileSuggestion, GovernanceScenarioKind, GovernanceSuggestion, GovernanceTargetKind, RiskLevel,
+    ScanReport, ScanResult, SuggestedAction,
 };
 use anyhow::{anyhow, Result};
 use reqwest::Client;
@@ -38,6 +39,7 @@ pub async fn build_advice(
                     source: format!("remote:{}", config.model),
                     summary: ai_output.summary,
                     suggestions: ai_output.suggestions,
+                    governance_suggestions: build_governance_suggestions(analysis, dedup),
                 });
             }
             Err(err) => {
@@ -50,6 +52,7 @@ pub async fn build_advice(
         source: "local_rules".to_string(),
         summary: build_display_summary(analysis, dedup, &suggestions),
         suggestions,
+        governance_suggestions: build_governance_suggestions(analysis, dedup),
     })
 }
 
@@ -59,6 +62,7 @@ pub fn build_local_advice(analysis: &AnalysisResult, dedup: &DedupResult) -> Adv
         source: "local_rules".to_string(),
         summary: build_display_summary(analysis, dedup, &suggestions),
         suggestions,
+        governance_suggestions: build_governance_suggestions(analysis, dedup),
     }
 }
 
@@ -324,6 +328,189 @@ fn build_rule_based_suggestions(
         .collect();
     values.sort_by(|left, right| left.path.cmp(&right.path));
     values
+}
+
+fn build_governance_suggestions(
+    analysis: &AnalysisResult,
+    dedup: &DedupResult,
+) -> Vec<GovernanceSuggestion> {
+    let mut items = Vec::new();
+
+    for file in analysis.large_files.iter().take(16) {
+        let path_text = file.path.to_string_lossy().to_ascii_lowercase();
+        let scenario = if path_text.contains("wechat")
+            || path_text.contains("weixin")
+            || path_text.contains("腾讯")
+        {
+            GovernanceScenarioKind::WechatData
+        } else if path_text.contains("\\downloads\\")
+            || looks_archive_or_installer(&file.path)
+            || is_video_like(file)
+        {
+            GovernanceScenarioKind::DownloadArchive
+        } else if path_text.contains("onedrive")
+            || path_text.contains("dropbox")
+            || path_text.contains("baidunetdisk")
+        {
+            GovernanceScenarioKind::CloudSync
+        } else {
+            GovernanceScenarioKind::LargeApp
+        };
+
+        let (title, tags, pre_checks, post_checks, action, risk_level) = match scenario {
+            GovernanceScenarioKind::WechatData => (
+                "微信/聊天数据占用".to_string(),
+                vec!["聊天数据".to_string(), "应用数据".to_string()],
+                vec![
+                    "确认微信或相关同步程序已退出".to_string(),
+                    "确认近期聊天图片与文件已完成备份".to_string(),
+                ],
+                vec![
+                    "重新打开微信并检查最近文件和图片是否可访问".to_string(),
+                    "确认原目录不再持续增长".to_string(),
+                ],
+                SuggestedAction::Move,
+                RiskLevel::Medium,
+            ),
+            GovernanceScenarioKind::CloudSync => (
+                "云盘同步目录占用".to_string(),
+                vec!["云盘".to_string(), "同步目录".to_string()],
+                vec![
+                    "确认同步状态为空闲，避免迁移中写入".to_string(),
+                    "确认该目录不是系统默认文档路径".to_string(),
+                ],
+                vec![
+                    "检查同步客户端是否仍能正常访问该目录".to_string(),
+                    "确认新目录已重新纳入同步策略".to_string(),
+                ],
+                SuggestedAction::Review,
+                RiskLevel::Medium,
+            ),
+            GovernanceScenarioKind::DownloadArchive => (
+                "下载归档/大文件占用".to_string(),
+                vec!["下载目录".to_string(), "归档文件".to_string()],
+                vec![
+                    "确认文件不是正在使用中的安装包或项目素材".to_string(),
+                    "确认至少保留一份可恢复副本".to_string(),
+                ],
+                vec![
+                    "验证目标目录中的文件可以正常打开".to_string(),
+                    "确认常用盘空间已经释放".to_string(),
+                ],
+                if looks_archive_or_installer(&file.path) {
+                    SuggestedAction::Move
+                } else {
+                    SuggestedAction::Review
+                },
+                RiskLevel::Low,
+            ),
+            _ => (
+                "大型应用/残留目录占用".to_string(),
+                vec!["大体积目录".to_string(), "人工复核".to_string()],
+                vec![
+                    "确认该目录是否仍被应用程序引用".to_string(),
+                    "必要时先查看占用进程和启动项引用".to_string(),
+                ],
+                vec![
+                    "重新启动相关应用并确认功能正常".to_string(),
+                    "确认未产生新的路径错误".to_string(),
+                ],
+                SuggestedAction::Review,
+                RiskLevel::Medium,
+            ),
+        };
+
+        items.push(GovernanceSuggestion {
+            id: format!("governance:{}", file.path.to_string_lossy()),
+            target_kind: GovernanceTargetKind::File,
+            target_path: file.path.clone(),
+            scenario_kind: scenario,
+            title,
+            action,
+            risk_level,
+            summary: format!("{} 占用较大，建议按场景复核后再处理。", file.path.display()),
+            reason: "该建议由本地规则生成，优先帮助用户理解是否可移动、删除或继续保留。".to_string(),
+            tags,
+            pre_check_items: pre_checks,
+            post_check_items: post_checks,
+            dry_run_supported: true,
+            rollback_supported: action == SuggestedAction::Move,
+        });
+    }
+
+    for file in analysis.temporary_files.iter().take(10) {
+        items.push(GovernanceSuggestion {
+            id: format!("temporary:{}", file.path.to_string_lossy()),
+            target_kind: GovernanceTargetKind::File,
+            target_path: file.path.clone(),
+            scenario_kind: GovernanceScenarioKind::TemporaryFile,
+            title: "临时文件占用".to_string(),
+            action: SuggestedAction::Delete,
+            risk_level: RiskLevel::Low,
+            summary: "检测到临时文件或中间态文件。".to_string(),
+            reason: "临时文件通常适合先 dry-run 再清理。".to_string(),
+            tags: vec!["临时文件".to_string(), "可快速复核".to_string()],
+            pre_check_items: vec!["确认文件未被正在运行的程序占用".to_string()],
+            post_check_items: vec!["确认目标应用仍可正常工作".to_string()],
+            dry_run_supported: true,
+            rollback_supported: false,
+        });
+    }
+
+    for path in analysis.empty_dirs.iter().take(10) {
+        items.push(GovernanceSuggestion {
+            id: format!("empty-dir:{}", path.to_string_lossy()),
+            target_kind: GovernanceTargetKind::Directory,
+            target_path: path.clone(),
+            scenario_kind: GovernanceScenarioKind::EmptyDirectory,
+            title: "空目录整理".to_string(),
+            action: SuggestedAction::Delete,
+            risk_level: RiskLevel::Low,
+            summary: "目录不包含文件，可作为低风险整理项。".to_string(),
+            reason: "空目录通常不会影响主要数据，但仍建议先确认不是预留挂载点。".to_string(),
+            tags: vec!["空目录".to_string()],
+            pre_check_items: vec!["确认目录不是程序约定的固定工作目录".to_string()],
+            post_check_items: vec!["确认相关程序重新打开后未自动报错".to_string()],
+            dry_run_supported: true,
+            rollback_supported: false,
+        });
+    }
+
+    for group in dedup.groups.iter().take(8) {
+        if let Some(target) = group.files.first() {
+            items.push(GovernanceSuggestion {
+                id: format!("duplicate:{}", group.hash),
+                target_kind: GovernanceTargetKind::File,
+                target_path: target.path.clone(),
+                scenario_kind: GovernanceScenarioKind::DuplicateFile,
+                title: "重复文件复核".to_string(),
+                action: SuggestedAction::Review,
+                risk_level: RiskLevel::Medium,
+                summary: format!("发现 {} 个重复副本，建议保留一份后再清理。", group.files.len()),
+                reason: "重复文件是否可删除取决于所在目录和使用场景，默认不直接自动清理。".to_string(),
+                tags: vec!["重复文件".to_string(), "需要人工确认".to_string()],
+                pre_check_items: vec!["确认建议保留的副本确实是主副本".to_string()],
+                post_check_items: vec!["确认引用该文件的应用仍能正常读取".to_string()],
+                dry_run_supported: true,
+                rollback_supported: false,
+            });
+        }
+    }
+
+    items
+}
+
+fn is_video_like(file: &FileRecord) -> bool {
+    matches!(
+        file.extension
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(ext)
+            if matches!(
+                ext.as_str(),
+                "mp4" | "mkv" | "mov" | "avi" | "wmv" | "flv" | "webm"
+            )
+    )
 }
 
 fn should_require_manual_review(group: &crate::models::DuplicateGroup) -> bool {

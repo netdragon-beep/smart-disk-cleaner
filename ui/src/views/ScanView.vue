@@ -15,6 +15,7 @@ import {
   NText,
 } from "naive-ui";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useAiCleanup } from "@/composables/useAiCleanup";
 import { useScan } from "@/composables/useScan";
 import { useAppStore } from "@/stores/app";
 import type { ProgressEvent } from "@/types";
@@ -67,6 +68,7 @@ const TEXT = {
 const router = useRouter();
 const store = useAppStore();
 const { scanning, progress, error, startScan, cancelScan } = useScan();
+const { generatePlan, loading: aiCleanupLoading } = useAiCleanup();
 const selectedPath = ref("");
 const elapsedSeconds = ref(0);
 const displayedProgressPercent = ref(0);
@@ -87,6 +89,23 @@ async function handleScan() {
   if (result) {
     displayedProgressPercent.value = 100;
     store.setReport(result);
+    router.push({ name: "results" });
+  }
+}
+
+async function handleAiCleanupScan() {
+  if (!selectedPath.value) return;
+  const result = await startScan(selectedPath.value);
+  if (!result) {
+    return;
+  }
+  displayedProgressPercent.value = 100;
+  store.setReport(result);
+  const plan = await generatePlan(store.config);
+  if (plan) {
+    store.setAiCleanupPlan(plan);
+    router.push({ name: "ai-cleanup" });
+  } else {
     router.push({ name: "results" });
   }
 }
@@ -361,6 +380,15 @@ onUnmounted(() => {
               >
                 {{ scanning ? TEXT.scanning : TEXT.startScan }}
               </n-button>
+              <n-button
+                secondary
+                type="primary"
+                @click="handleAiCleanupScan"
+                :disabled="!selectedPath || scanning || aiCleanupLoading"
+                :loading="aiCleanupLoading"
+              >
+                {{ aiCleanupLoading ? "正在生成 AI 整理建议..." : "AI 一键整理" }}
+              </n-button>
             </div>
           </div>
 
@@ -516,6 +544,12 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+:root.dark .scan-path-panel,
+:root.dark .scan-tips-card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.92) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.72);
+}
+
 .scan-path-panel::after,
 .scan-tips-card::after {
   content: "";
@@ -576,6 +610,11 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+:root.dark .scan-phase-item {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.96) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.72);
+}
+
 .scan-phase-item::before {
   content: "";
   position: absolute;
@@ -591,9 +630,19 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #ffffff 0%, #f5f9ff 100%);
 }
 
+:root.dark .scan-phase-item--process {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(30, 58, 138, 0.26) 100%);
+}
+
 .scan-phase-item--finish {
   border-color: rgba(31, 157, 115, 0.24);
   background: linear-gradient(135deg, #ffffff 0%, #f2fbf7 100%);
+}
+
+:root.dark .scan-phase-item--finish {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(22, 163, 74, 0.18) 100%);
 }
 
 .scan-phase-item__title {

@@ -10,7 +10,7 @@ use smart_disk_cleaner_core::models::{
     DiagnosticCode, DiagnosticSeverity, ExecutionMode, MigrationAction, MigrationActionKind,
     MigrationAdvisorOutput, MigrationCheckpoint, MigrationCheckpointKind, MigrationExecutionRecord,
     MigrationPlan, MigrationPlanReview, MigrationRollbackAction, MigrationRunStatus,
-    OperationLogEntry, PathDiagnosis,
+    OperationLogEntry, OperationRecordKind, PathDiagnosis,
 };
 use smart_disk_cleaner_core::platform::{
     is_macos_system_sensitive_path, is_windows_system_sensitive_path,
@@ -100,6 +100,9 @@ pub async fn execute_migration_plan(
                     dry_run: request.dry_run,
                     success: false,
                     detail: error,
+                    record_kind: OperationRecordKind::Migration,
+                    reason: Some("迁移计划执行中断".to_string()),
+                    rollback_reference: None,
                     diagnosis: Some(simple_diagnosis(
                         &request.plan.source_path,
                         "execute_plan",
@@ -216,6 +219,9 @@ pub async fn rollback_migration_run(
                     dry_run: false,
                     success: false,
                     detail: error,
+                    record_kind: OperationRecordKind::Migration,
+                    reason: Some("迁移回滚执行失败".to_string()),
+                    rollback_reference: None,
                     diagnosis: None,
                 });
                 break;
@@ -877,6 +883,9 @@ fn success_log(path: &Path, dry_run: bool, detail: String) -> OperationLogEntry 
         dry_run,
         success: true,
         detail,
+        record_kind: OperationRecordKind::Migration,
+        reason: Some("迁移步骤执行成功".to_string()),
+        rollback_reference: None,
         diagnosis: None,
     }
 }
@@ -894,6 +903,9 @@ fn failure_log(
         dry_run,
         success: false,
         detail,
+        record_kind: OperationRecordKind::Migration,
+        reason: Some("迁移步骤执行失败".to_string()),
+        rollback_reference: None,
         diagnosis,
     }
 }

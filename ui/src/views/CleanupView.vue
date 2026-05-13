@@ -391,11 +391,11 @@ async function retryCurrentEntry() {
           </div>
           <n-button
             type="primary"
-            :disabled="selectedPaths.length === 0 || (mode.value === 'move' && !targetDir.value.trim()) || executing"
+            :disabled="selectedPaths.length === 0 || (mode === 'move' && !targetDir.trim()) || executing"
             :loading="executing"
             @click="handleConfirm"
           >
-            {{ mode.value === 'move' ? TEXT.move : TEXT.executeCleanup }} ({{ TEXT.selected }} {{ selectedPaths.length }} {{ TEXT.item }})
+            {{ mode === 'move' ? TEXT.move : TEXT.executeCleanup }} ({{ TEXT.selected }} {{ selectedPaths.length }} {{ TEXT.item }})
           </n-button>
         </div>
       </n-space>

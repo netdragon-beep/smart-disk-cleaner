@@ -330,12 +330,59 @@ pub struct FileSuggestion {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceTargetKind {
+    File,
+    Directory,
+    AppData,
+    AppInstallation,
+    RegistryEntry,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceScenarioKind {
+    WechatData,
+    DownloadArchive,
+    CloudSync,
+    LargeApp,
+    DuplicateFile,
+    TemporaryFile,
+    EmptyFile,
+    EmptyDirectory,
+    RegistryStartup,
+    RegistryPathReference,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GovernanceSuggestion {
+    pub id: String,
+    pub target_kind: GovernanceTargetKind,
+    pub target_path: PathBuf,
+    pub scenario_kind: GovernanceScenarioKind,
+    pub title: String,
+    pub action: SuggestedAction,
+    pub risk_level: RiskLevel,
+    pub summary: String,
+    pub reason: String,
+    pub tags: Vec<String>,
+    pub pre_check_items: Vec<String>,
+    pub post_check_items: Vec<String>,
+    pub dry_run_supported: bool,
+    pub rollback_supported: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdvisorOutput {
     pub source: String,
     pub summary: String,
     pub suggestions: Vec<FileSuggestion>,
+    #[serde(default)]
+    pub governance_suggestions: Vec<GovernanceSuggestion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -434,6 +481,15 @@ pub struct ScanReport {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum OperationRecordKind {
+    FileCleanup,
+    Migration,
+    RegistryChange,
+    RegistryRollback,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
     Recycle,
     Move,
@@ -487,5 +543,108 @@ pub struct OperationLogEntry {
     pub dry_run: bool,
     pub success: bool,
     pub detail: String,
+    #[serde(default = "default_operation_record_kind")]
+    pub record_kind: OperationRecordKind,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub rollback_reference: Option<String>,
     pub diagnosis: Option<PathDiagnosis>,
+}
+
+fn default_operation_record_kind() -> OperationRecordKind {
+    OperationRecordKind::FileCleanup
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryEntryKind {
+    Startup,
+    Uninstall,
+    PathReference,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryRootKey {
+    Hkcu,
+    Hklm,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryValueDataKind {
+    String,
+    ExpandString,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryEntryRecord {
+    pub id: String,
+    pub root_key: RegistryRootKey,
+    pub sub_key: String,
+    pub value_name: String,
+    pub value_kind: RegistryValueDataKind,
+    pub value_data: String,
+    pub entry_kind: RegistryEntryKind,
+    pub display_name: String,
+    pub target_path: Option<PathBuf>,
+    pub exists_on_disk: bool,
+    pub safe_to_modify: bool,
+    pub risk_level: RiskLevel,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryIssueKind {
+    MissingTarget,
+    MissingQuotedPath,
+    StartupEntryEnabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryIssue {
+    pub id: String,
+    pub entry_id: String,
+    pub issue_kind: RegistryIssueKind,
+    pub title: String,
+    pub summary: String,
+    pub risk_level: RiskLevel,
+    pub suggested_action: SuggestedAction,
+    pub pre_check_items: Vec<String>,
+    pub post_check_items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryBackup {
+    pub backup_id: String,
+    pub entry: RegistryEntryRecord,
+    pub original_value_data: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryChangePreview {
+    pub entry: RegistryEntryRecord,
+    pub risk_level: RiskLevel,
+    pub backup_id: Option<String>,
+    pub dry_run_supported: bool,
+    pub rollback_supported: bool,
+    pub before_value: String,
+    pub after_value: String,
+    pub post_check_items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryRollbackRecord {
+    pub backup_id: String,
+    pub restored_at: DateTime<Utc>,
+    pub entry: RegistryEntryRecord,
 }

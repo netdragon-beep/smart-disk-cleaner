@@ -744,6 +744,11 @@ async function retryCurrentPlan() {
   border: 1px solid rgba(230, 235, 243, 0.94);
 }
 
+:root.dark .migration-target-card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.94) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.78);
+}
+
 .migration-target-card__label,
 .migration-plan-card__label {
   margin-bottom: 8px;
@@ -784,6 +789,13 @@ async function retryCurrentPlan() {
   border: 1px solid var(--border-soft);
   background: linear-gradient(135deg, #ffffff 0%, #fafcff 100%);
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.05);
+}
+
+:root.dark .migration-plan-card,
+:root.dark .migration-history-card {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(71, 85, 105, 0.78);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.3);
 }
 
 .migration-plan-card__header,
@@ -842,9 +854,18 @@ async function retryCurrentPlan() {
   transition: transform 0.18s ease, border-color 0.18s ease;
 }
 
+:root.dark .migration-stack-item {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(51, 65, 85, 0.95);
+}
+
 .migration-stack-item:hover {
   transform: translateY(-1px);
   border-color: rgba(23, 133, 108, 0.24);
+}
+
+:root.dark .migration-stack-item:hover {
+  border-color: rgba(34, 197, 94, 0.32);
 }
 
 .migration-stack-item__title {
