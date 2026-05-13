@@ -1,102 +1,359 @@
 # smart-disk-cleaner
 
-`smart-disk-cleaner` is a **local storage governance assistant for Windows power users**.  
-It does not treat disk cleanup as a vague “system optimization” problem. Instead, it focuses on:
+`smart-disk-cleaner` 是一个面向 **Windows 重度用户** 的 **本地存储治理助手**。
 
-- finding space-heavy content
-- explaining why something is safe or risky to change
-- guiding cleanup and migration with `dry-run`
-- recording actions and keeping rollback paths visible
+它不把“磁盘空间不够”简单理解成“找点垃圾删掉”，而是更关注三件事：
 
-## Positioning
+- **找出真正占空间的内容**
+- **在执行前解释风险与边界**
+- **用可回看、可回滚的方式执行清理或迁移**
 
-This project is now oriented around three product lines:
+这个项目同时面向两个目标：
 
-1. `Space Discovery`
-   Scan directories and identify large files, temporary content, duplicate files, app data, and typical disk pressure scenarios.
+- 作为一个可持续演进的开源桌面工具
+- 作为一个具有产品思路和工程深度的毕业作品 / 作品集项目
 
-2. `Risk Explanation`
-   Convert raw scan output into governance suggestions with scenario labels, risk levels, pre-check steps, and post-check validation steps.
+## 为什么要做这个项目
 
-3. `Safe Execution`
-   Support cleanup, migration, registry startup governance, operation history, and rollback-oriented workflows.
+很多传统磁盘清理工具擅长做的是：
 
-## Typical scenarios
+- 告诉你哪个目录大
+- 告诉你哪些文件重复
+- 告诉你哪些内容可以删除
 
-- WeChat / QQ / enterprise chat data occupying too much space
-- Download folders with large archives, installers, and videos
-- Cloud-sync folders consuming local disk unexpectedly
-- Large application directories and leftovers that should be reviewed before removal
-- Startup registry entries that can be backed up, previewed, disabled, and rolled back safely
+但它们通常不擅长回答这些真正关键的问题：
 
-## Safety principles
+- 这个目录到底属于微信、网盘同步、应用缓存，还是正常软件数据？
+- 这个内容是适合删除、适合迁移，还是应该保留？
+- 动它之前需要先检查什么？
+- 如果改坏了，有没有恢复路径？
 
-- Safe by default: destructive actions should support `dry-run`
-- Explain before execute: every high-value suggestion should tell the user why it exists
-- No blind bulk registry cleanup
-- No “one-click acceleration” narrative
-- Keep rollback visible in both migration and registry governance flows
+`smart-disk-cleaner` 希望把这个问题从“磁盘清理”提升成“**本地存储治理**”。
 
-## Architecture overview
+它不仅要告诉用户“哪里大”，还要告诉用户：
 
-- `crates/core`
-  Core scan, analysis, governance suggestion, migration planning, and diagnostics logic
-- `src-tauri`
-  Tauri command layer for scan, cleanup, migration, process diagnosis, registry governance, and config/state
-- `ui`
-  Vue + Naive UI desktop frontend organized around discovery, explanation, and safe action
+- **为什么它大**
+- **为什么能动或不能动**
+- **动之前该做什么**
+- **动完之后如何验证**
 
-## Local rules vs AI
+## 核心思路
 
-The project uses **local rules first** and AI as an optional explanation layer.
+这个项目围绕三条主线组织：
 
-- local rules generate structured governance suggestions
-- AI can refine explanation, not replace safety checks
-- when remote AI fails, the app should fall back to local rules instead of returning an empty result
+### 1. 空间发现（Space Discovery）
 
-## Current implemented direction
+扫描目录或磁盘根目录，识别：
 
-- scan reports now expose governance suggestions in addition to raw cleanup suggestions
-- operation history can distinguish file cleanup, migration, registry change, and registry rollback records
-- registry governance supports:
-  - startup entry listing
-  - path issue detection
-  - explicit backup export
-  - change preview
-  - single-entry apply
-  - single-entry rollback
+- 大文件
+- 临时文件
+- 重复文件
+- 压缩包 / 安装包
+- 应用相关目录
+- 用户可感知的空间热点
 
-## Quick start
+### 2. 风险解释（Risk Explanation）
 
-Install dependencies and run the desktop app:
+把底层扫描结果转成更适合用户理解的 **治理建议**，包括：
+
+- 场景标签
+- 风险等级
+- 建议动作
+- 执行前检查项
+- 执行后验证项
+
+### 3. 安全执行（Safe Execution）
+
+把建议进一步转成可操作链路，包括：
+
+- `dry-run`
+- 文件清理
+- 结构化迁移计划
+- 历史记录
+- 回滚导向的治理流程
+
+## 目标用户
+
+当前版本优先面向 **Windows 重度用户**，而不是泛大众用户。
+
+典型用户包括：
+
+- 微信 / QQ / 企业微信 / 网盘目录经常占满磁盘的人
+- 下载目录里堆满安装包、压缩包、视频、大文件的人
+- 想要“先解释、再执行”，而不是“删完再说”的用户
+- 关注系统行为可解释性和回滚能力的开发者或高阶用户
+
+## 典型使用场景
+
+当前产品方向重点覆盖这些 Windows 场景：
+
+### 微信 / 聊天软件数据目录
+
+这类目录往往体积很大，但通常不适合盲删。  
+更合理的处理方式通常是：
+
+- 先识别它属于哪类应用数据
+- 给出迁移或复核建议
+- 必要时提示先关闭相关进程
+
+### 下载目录
+
+下载目录里常见的大型安装包、压缩包、镜像文件、视频素材，往往适合：
+
+- 移动到归档盘
+- 保留一份、清理冗余副本
+- 在 `dry-run` 后再正式执行
+
+### 网盘同步目录
+
+这类目录表面上像普通文件夹，但背后可能被同步客户端持续占用。  
+因此需要：
+
+- 识别同步相关场景
+- 提示同步状态和前置检查
+- 避免误迁移导致同步策略异常
+
+### 大型应用目录或残留目录
+
+很多“看起来能删”的目录，其实仍然被应用依赖。  
+这个项目希望在执行前补充：
+
+- 应用归属判断
+- 风险解释
+- 必要的人工确认提示
+
+### 启动项与路径引用问题
+
+注册表相关能力不走“垃圾清理器”路线，而是只做：
+
+- 启动项读取
+- 路径异常识别
+- 显式备份
+- 变更预览
+- 单项修改
+- 单项回滚
+
+## 和普通磁盘清理工具有什么区别
+
+这个项目刻意不把自己做成下面这些东西：
+
+- “一键系统加速器”
+- “注册表垃圾清理大师”
+- “深度优化工具”
+- “删得越多越好”的空间清理器
+
+它的核心差异在于把下面几件事组合在一起：
+
+- **本地规则分析**
+- **AI 辅助解释**
+- **结构化治理建议**
+- **历史记录与回滚可见性**
+
+一句话概括：
+
+> 它关注的不只是“删什么”，而是“为什么删、为什么不能删、删了怎么验证、出问题怎么回退”。
+
+## 当前功能
+
+### 扫描与分析
+
+- 目录扫描
+- 大文件识别
+- 空文件 / 空目录识别
+- 重复文件识别
+- 文件类型分布统计
+- 应用概览与目录概览
+
+### 治理建议
+
+- 原始清理建议
+- 统一治理建议模型
+- 风险等级与建议动作
+- 执行前检查项与执行后验证项
+
+### 执行链路
+
+- 支持 `dry-run` 的清理执行
+- 支持移动到目标目录
+- Windows 路径占用进程检测
+- 操作历史记录
+
+### 迁移链路
+
+- 迁移建议生成
+- 结构化迁移计划
+- 迁移执行历史
+- 迁移回滚流程
+
+### 注册表治理
+
+- 启动项读取
+- 路径问题识别
+- 显式备份导出
+- 修改前 diff 预览
+- 单项修改
+- 单项回滚
+
+### AI 辅助能力
+
+- AI 清理计划生成
+- 文件 / 路径解释
+- 进程解释
+- 远程 AI 不可用时回退到本地规则
+
+## 安全模型
+
+安全性是这个项目的核心前提，不是附属功能。
+
+### 默认安全
+
+高风险动作应优先支持 `dry-run`，避免“先删后想”。
+
+### 先解释，再执行
+
+每一条高价值建议都应该尽量说明：
+
+- 为什么会被识别出来
+- 它属于什么场景
+- 为什么建议这样处理
+
+### 不做盲目注册表清理
+
+注册表相关能力必须满足：
+
+- 显式定位
+- 先备份
+- 可预览
+- 可回滚
+
+### 人始终在回路中
+
+AI 可以解释，不可以代替最终确认。  
+高风险动作仍然需要用户显式决定。
+
+### 历史可追溯
+
+清理、迁移、注册表修改都应保留足够的历史上下文，方便复核与恢复。
+
+## 项目结构
+
+### `crates/core`
+
+核心逻辑层，负责：
+
+- 扫描
+- 分析
+- 治理建议生成
+- 重复文件识别
+- 迁移规划
+- 诊断逻辑
+
+### `src-tauri`
+
+桌面端命令层，负责：
+
+- 扫描命令
+- 清理命令
+- 迁移命令
+- 进程诊断
+- 注册表治理
+- 配置与运行时状态管理
+
+### `ui`
+
+基于 Vue + Naive UI 的桌面前端，当前围绕三条主线组织：
+
+- 空间发现
+- 风险解释
+- 安全执行
+
+当前主要页面包括：
+
+- 扫描页
+- 结果工作台
+- 清理执行页
+- 迁移页
+- 进程诊断页
+- 注册表治理页
+- 历史记录页
+- 设置页
+
+## 本地规则与 AI 的关系
+
+这个项目采用 **本地规则优先（local-rules-first）** 的策略。
+
+具体来说：
+
+- 本地规则负责生成结构化建议
+- AI 负责增强解释与表达
+- AI 不负责替代安全检查
+- 远程 AI 失败时，界面应回退到本地规则，而不是返回空结果
+
+这样设计主要是为了：
+
+- 提高可靠性
+- 控制成本
+- 保持可解释性
+- 增强用户信任
+
+## 演示流程建议
+
+如果把它作为 GitHub 项目展示、作品集项目或毕业答辩演示，比较推荐这样展示：
+
+1. 扫描一个用户目录或磁盘根目录
+2. 展示高价值治理建议
+3. 如果路径被占用，切到进程诊断
+4. 执行一次 `dry-run` 清理或迁移动作
+5. 执行一次真实操作
+6. 打开历史记录查看治理留痕
+7. 演示注册表启动项预览与回滚
+
+## 快速开始
+
+### 运行环境
+
+- Windows
+- Node.js
+- Rust 工具链
+- WebView2 Runtime
+
+### 启动桌面应用
 
 ```bash
 npm --prefix ui install
-cargo tauri dev
+npx tauri dev
 ```
 
-Build checks:
+### 构建检查
 
 ```bash
 cargo check -p smart-disk-cleaner-gui
 npm --prefix ui run build
 ```
 
-## Demo flow
+## 后续路线
 
-For an open-source showcase or graduation demo, the recommended flow is:
+当前版本正在从“清理原型”逐步演进为“**本地存储治理工具**”。
 
-1. Scan a user directory or disk root
-2. Show governance suggestions for high-impact scenarios
-3. Open process diagnosis if a target path is occupied
-4. Run a `dry-run` cleanup or migration step
-5. Execute a real action
-6. Open history and explain rollback references
-7. Show registry startup governance preview and rollback
+近期重点方向包括：
 
-## What this project intentionally does not claim
+- 更强的 Windows 场景识别
+- 更好的治理建议展示方式
+- 更统一的清理 / 迁移执行链路
+- 更严格边界下的注册表治理能力
+- 更完整的 README、截图、演示资源与开源包装
 
-- it is not a generic “system booster”
-- it does not perform blind registry junk cleanup
-- it does not promise that all large files are safe to delete
-- it does not replace user confirmation for high-risk actions
+## 这个项目不宣称什么
+
+为了保持可信度，这个项目刻意 **不** 宣称：
+
+- 所有大文件都适合删除
+- 注册表应该自动批量清理
+- “系统加速”是一个有意义的主卖点
+- AI 可以替代用户做高风险决策
+
+## 当前状态
+
+这个仓库正在从一个偏“磁盘清理”的原型，演进成一个更明确的 **本地存储治理桌面工具**。
+
+这个演进本身，就是它最重要的产品和工程故事之一。
